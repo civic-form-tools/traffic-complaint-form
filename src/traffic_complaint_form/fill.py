@@ -115,7 +115,7 @@ def _description_block_html(case: CaseData) -> str:
     count = len(case.incidents)
     return (
         f'<div class="desc multi">ב-{count} המועדים המפורטים בטבלה שלעיל, הרכב ביצע את העבירות '
-        'המצוינות לכל מועד בעמודה ִתיאור העבירהִ.</div>'
+        "המצוינות לכל מועד בעמודה ִתיאור העבירהִ.</div>"
     )
 
 
