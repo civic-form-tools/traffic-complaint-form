@@ -138,3 +138,54 @@ def test_is_test_mode_default_true():
 def test_required_secret_names_dry_run():
     assert "SMTP_USERNAME" not in required_secret_names(dry_run=True)
     assert "SMTP_USERNAME" in required_secret_names(dry_run=False)
+
+
+def test_required_secret_names_pdf_password_only_real_mode():
+    assert "PDF_PASSWORD" not in required_secret_names(dry_run=True, encrypt_output=True, test_mode=True)
+    assert "PDF_PASSWORD" in required_secret_names(dry_run=True, encrypt_output=True, test_mode=False)
+    assert "PDF_PASSWORD" not in required_secret_names(dry_run=True, encrypt_output=False, test_mode=False)
+
+
+def test_real_mode_requires_pdf_password(monkeypatch, tmp_path, caplog):
+    env = dict(ENV)
+    env.pop("PDF_PASSWORD", None)
+    set_env(monkeypatch, extra=env)
+    monkeypatch.setenv("PDF_PASSWORD", "")
+    monkeypatch.setenv("TEST_MODE", "false")
+    with caplog.at_level(logging.INFO):
+        code = main(["--sample", "--out-dir", str(tmp_path), "--dry-run"])
+    assert code == 2
+    assert "PDF_PASSWORD" in caplog.text
+
+
+def test_test_mode_falls_back_to_id_password(monkeypatch, tmp_path, caplog):
+    env = dict(ENV)
+    env.pop("PDF_PASSWORD", None)
+    set_env(monkeypatch, extra=env)
+    monkeypatch.setenv("PDF_PASSWORD", "")
+    with caplog.at_level(logging.INFO):
+        code = main(["--sample", "--out-dir", str(tmp_path), "--dry-run"])
+    assert code == 0
+    assert "low entropy" in caplog.text
+    assert ENV["COMPLAINANT_ID"] not in caplog.text  # the password never logs
+    produced = list(tmp_path.glob("*.pdf"))
+    assert len(produced) == 1
+    import pikepdf
+
+    with pikepdf.open(str(produced[0]), password=ENV["COMPLAINANT_ID"]) as pdf:
+        assert len(pdf.pages) == 1
+
+
+def test_dedicated_password_overrides_id(monkeypatch, tmp_path):
+    set_env(monkeypatch)  # ENV includes PDF_PASSWORD=test-pw
+    code = main(["--sample", "--out-dir", str(tmp_path), "--dry-run"])
+    assert code == 0
+    produced = list(tmp_path.glob("*.pdf"))
+    import pikepdf
+
+    with pikepdf.open(str(produced[0]), password="test-pw") as pdf:
+        assert len(pdf.pages) == 1
+    import pytest
+
+    with pytest.raises(pikepdf.PasswordError):
+        pikepdf.open(str(produced[0]), password=ENV["COMPLAINANT_ID"])

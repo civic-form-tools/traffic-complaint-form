@@ -11,6 +11,13 @@ real complaint. Set it to "false" only after real secrets are loaded.
 ENCRYPT_OUTPUT (GitHub Actions variable, default "true") controls PDF
 encryption. It may be "false" only while TEST_MODE is "true" (dummy data);
 with real values the CLI refuses to deliver an unencrypted form.
+
+PDF password resolution (user decision, 2026-10-26): the dedicated
+PDF_PASSWORD secret is the documented primary for real data. When it is
+unset, TEST_MODE falls back to the complainant ID number - convenient for
+pipeline tests but low-entropy (9 digits, offline-brute-forceable), an
+explicitly accepted tradeoff for test data only. Outside test mode a
+missing PDF_PASSWORD fails the run before any work, by NAME only.
 """
 
 from __future__ import annotations
@@ -64,9 +71,11 @@ def is_encrypt_output(environ: dict[str, str] | None = None) -> bool:
     return env.get("ENCRYPT_OUTPUT", "true").strip().lower() not in {"false", "0", "no"}
 
 
-def required_secret_names(*, dry_run: bool, encrypt_output: bool = True) -> list[str]:
+def required_secret_names(*, dry_run: bool, encrypt_output: bool = True, test_mode: bool = True) -> list[str]:
     names = list(COMPLAINANT_ENV_VARS)
-    if encrypt_output:
+    if encrypt_output and not test_mode:
+        # Real data: the dedicated secret is mandatory. Test mode may fall
+        # back to the complainant ID (already required above).
         names.append("PDF_PASSWORD")
     if not dry_run:
         names += [name for name in DELIVERY_ENV_VARS if name != "PDF_PASSWORD"]
@@ -85,10 +94,16 @@ def main(argv: list[str] | None = None) -> int:
     if not encrypt_output and not test_mode:
         logger.error("ENCRYPT_OUTPUT=false is allowed only while TEST_MODE=true (dummy data) - refusing to run")
         return EXIT_UNSAFE
+
+    def _is_set(name: str) -> bool:
+        # Value stays inside this helper; only the boolean leaves, so the
+        # names-only error below can never carry a secret into the logs.
+        return bool(os.environ.get(name, "").strip())
+
     missing = [
         name
-        for name in required_secret_names(dry_run=args.dry_run, encrypt_output=encrypt_output)
-        if not os.environ.get(name, "").strip()
+        for name in required_secret_names(dry_run=args.dry_run, encrypt_output=encrypt_output, test_mode=test_mode)
+        if not _is_set(name)
     ]
     if missing:
         logger.error("Missing required secret environment variables (names only): %s", ", ".join(missing))
@@ -100,6 +115,16 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_MISSING_CONFIG
     for warning in complainant.checksum_warnings():
         logger.warning("%s", warning)
+
+    pdf_password = None
+    if encrypt_output:
+        pdf_password = os.environ.get("PDF_PASSWORD", "").strip() or None
+        if pdf_password is None and test_mode:
+            pdf_password = complainant.id_number
+            logger.info(
+                "TEST_MODE: PDF_PASSWORD unset - encrypting with the complainant ID "
+                "(low entropy, accepted for test data only)"
+            )
 
     private_case = bool(args.case_encrypted)
     if args.case_encrypted:
@@ -146,9 +171,12 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("Rendered form is %s pages, expected 1 - shorten the description", pages)
             return EXIT_OVERFLOW
         if encrypt_output:
+            if pdf_password is None:
+                logger.error("PDF_PASSWORD is required outside TEST_MODE (name only) - refusing to run")
+                return EXIT_MISSING_CONFIG
             try:
-                encrypt_pdf(plain_pdf, outfile, password=os.environ["PDF_PASSWORD"])
-                verify_encrypted_pdf(outfile, password=os.environ["PDF_PASSWORD"], expected_pages=1)
+                encrypt_pdf(plain_pdf, outfile, password=pdf_password)
+                verify_encrypted_pdf(outfile, password=pdf_password, expected_pages=1)
             except Exception:
                 logger.exception("Encryption or post-encryption verification failed")
                 outfile.unlink(missing_ok=True)
