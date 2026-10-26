@@ -137,3 +137,11 @@ check runs before any setup.
   encrypted payload per repeat-offence plate.
 - Witness rows beyond one; multi-case batch runs.
 - CodeRabbit enablement (public repo, per user convention).
+
+## Atomic filing configuration (2026-10-26)
+
+FILING_BUNDLE replaces all individual identity, PDF-password and SMTP/delivery
+secrets. The strict, versioned JSON object is loaded atomically, never merged
+with separate fields. Encryption is mandatory even in test mode. The current
+configuration contract and residual trust risks supersede the earlier
+individual-secret design: see [SECRETS.md](SECRETS.md).

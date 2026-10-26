@@ -49,3 +49,20 @@ def test_choice_options_and_defaults_are_strings():
             default = spec.get("default")
             if default is not None and spec.get("type") != "boolean":
                 assert isinstance(default, str), f"{path.name}:{name} non-string default {default!r}"
+
+
+def test_filing_boundary_and_secret_scope():
+    workflow = yaml.safe_load(Path(".github/workflows/fill-form.yml").read_text())
+    job = workflow["jobs"]["fill"]
+    assert job["environment"] == "filing"
+    assert job["if"] == "github.ref == 'refs/heads/main'"
+    assert "env" not in job  # credentials must not reach checkout, pip or package setup
+    steps = job["steps"]
+    secret_steps = [s for s in steps if "secrets." in str(s)]
+    assert len(secret_steps) == 1
+    assert secret_steps[0]["name"] == "Fill, verify and send"
+    assert secret_steps[0]["env"]["FILING_BUNDLE"] == "${{ secrets.FILING_BUNDLE }}"
+    text = Path(".github/workflows/fill-form.yml").read_text()
+    for name in ["COMPLAINANT_ID", "PDF_PASSWORD", "SMTP_APP_PASSWORD", "RECIPIENT_EMAIL"]:
+        assert "secrets." + name not in text
+    assert "'${{ inputs.encrypted_case }}'" not in text

@@ -101,7 +101,7 @@ def hebrew_weekday(day: date) -> str:
     return HEBREW_WEEKDAYS[day.weekday()]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class Complainant:
     """Identity of the person filing the complaint. Loaded only from secrets."""
 

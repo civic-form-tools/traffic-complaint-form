@@ -22,42 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: filing # required reviewers gate every run before secrets are exposed
-    env:
-      TEST_MODE: ${{ vars.TEST_MODE }}
-      ENCRYPT_OUTPUT: ${{ vars.ENCRYPT_OUTPUT }}
-      COMPLAINANT_FIRST_NAME: ${{ secrets.COMPLAINANT_FIRST_NAME }}
-      COMPLAINANT_LAST_NAME: ${{ secrets.COMPLAINANT_LAST_NAME }}
-      COMPLAINANT_ID: ${{ secrets.COMPLAINANT_ID }}
-      COMPLAINANT_ADDRESS: ${{ secrets.COMPLAINANT_ADDRESS }}
-      COMPLAINANT_PHONE: ${{ secrets.COMPLAINANT_PHONE }}
-      PDF_PASSWORD: ${{ secrets.PDF_PASSWORD }}
-      RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_FROM: ${{ secrets.SMTP_FROM }}
-      CASE_DATA_PRIVATE_KEY: ${{ secrets.CASE_DATA_PRIVATE_KEY }}
+    if: github.ref == 'refs/heads/main'
     steps:
-      - name: Validate required secrets (names only, fail fast)
-        run: |
-          missing=""
-          for name in COMPLAINANT_FIRST_NAME COMPLAINANT_LAST_NAME COMPLAINANT_ID COMPLAINANT_ADDRESS COMPLAINANT_PHONE; do
-            [ -z "${!name}" ] && missing="$missing $name"
-          done
-          if [ "${ENCRYPT_OUTPUT:-true}" != "false" ] && [ -z "$PDF_PASSWORD" ]; then missing="$missing PDF_PASSWORD"; fi
-          if [ "${{ inputs.dry_run }}" != "true" ]; then
-            for name in RECIPIENT_EMAIL SMTP_HOST SMTP_USERNAME SMTP_APP_PASSWORD SMTP_FROM; do
-              [ -z "${!name}" ] && missing="$missing $name"
-            done
-          fi
-          if [ -n "${{ inputs.encrypted_case }}" ] && [ -z "$CASE_DATA_PRIVATE_KEY" ]; then missing="$missing CASE_DATA_PRIVATE_KEY"; fi
-          if [ -n "$missing" ]; then
-            echo "::error::Missing required secrets (names only):$missing"
-            exit 1
-          fi
-          echo "All required secrets are configured."
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -75,9 +41,11 @@ jobs:
       - run: pip install -e .
 
       - name: Build case payload
+        env:
+          ENCRYPTED_CASE: ${{ inputs.encrypted_case }}
         run: |
-          if [ -n "${{ inputs.encrypted_case }}" ]; then
-            printf '%s' '${{ inputs.encrypted_case }}' > /tmp/case.enc
+          if [ -n "$ENCRYPTED_CASE" ]; then
+            printf '%s' "$ENCRYPTED_CASE" > /tmp/case.enc
             echo "MODE=encrypted" >> "$GITHUB_ENV"
           else
             echo "MODE=sample" >> "$GITHUB_ENV"
@@ -91,6 +59,10 @@ jobs:
             sample)    python -m traffic_complaint_form --sample --out-dir out ${DRY:+--dry-run} ;;
           esac
         env:
+          FILING_BUNDLE: ${{ secrets.FILING_BUNDLE }}
+          CASE_DATA_PRIVATE_KEY: ${{ secrets.CASE_DATA_PRIVATE_KEY }}
+          TEST_MODE: ${{ vars.TEST_MODE }}
+          ENCRYPT_OUTPUT: ${{ vars.ENCRYPT_OUTPUT }}
           DRY: ${{ inputs.dry_run && '1' || '' }}
 
       - name: Post-run verification summary
@@ -102,11 +74,10 @@ jobs:
           size = os.path.getsize(files[0])
           assert size > 10_000, f"output suspiciously small: {size}"
           import pikepdf
-          if os.environ.get("ENCRYPT_OUTPUT", "true").lower() != "false":
-              try:
-                  pikepdf.open(files[0])
-                  raise SystemExit("output opens WITHOUT a password - refusing to finish green")
-              except pikepdf.PasswordError:
-                  pass
+          try:
+              pikepdf.open(files[0])
+              raise SystemExit("output opens WITHOUT a password - refusing to finish green")
+          except pikepdf.PasswordError:
+              pass
           print(f"verification OK: one PDF, {size} bytes, encryption state as configured")
           PY

@@ -22,14 +22,14 @@ ENCRYPTION_NOTE = (
 
 BODY_REAL = (
     "מצורף טופס התלונה הממולא, מוצפן בסיסמה.\n"
-    "הסיסמה היא הסיסמה הייעודית שהוגדרה ב-GitHub Secret בשם PDF_PASSWORD.\n\n"
+    "הסיסמה היא הסיסמה הייעודית שהוגדרה בשדה pdf_password של FILING_BUNDLE.\n\n"
     + ENCRYPTION_NOTE
     + "הודעה אוטומטית ממערכת traffic-complaint-form."
 )
 
 BODY_TEST = (
     "מצורף טופס תלונה לדוגמה, מוצפן בסיסמה.\n"
-    "אם הוגדר PDF_PASSWORD - זו הסיסמה; אחרת (ברירת מחדל במצב בדיקה) - מספר תעודת הזהות.\n\n"
+    "הסיסמה הוגדרה בשדה pdf_password של FILING_BUNDLE.\n\n"
     + ENCRYPTION_NOTE
     + "הודעה אוטומטית ממערכת traffic-complaint-form."
 )

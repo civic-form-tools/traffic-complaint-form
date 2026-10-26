@@ -1,56 +1,111 @@
-# Secrets specification
+# Atomic filing secret
 
-All values are loaded by the user into GitHub Secrets (Settings -> Secrets
-and variables -> Actions -> the `filing` environment). Values are write-only
-afterwards: nobody, including the automation, can read them back through the
-API. The examples below are **invented** - never load or commit real values
-into this repository.
+Create **FILING_BUNDLE** under Settings -> Environments -> **filing** ->
+Environment secrets. Do not create a repository-level copy. The parser
+requires the complete version-1 JSON object, including delivery settings,
+even for dry runs. There is no fallback to the old individual secrets.
 
-| Secret | Invented example | Notes |
-| --- | --- | --- |
-| `COMPLAINANT_FIRST_NAME` | `משה` | Form field שם |
-| `COMPLAINANT_LAST_NAME` | `כהן` | Form field משפחה |
-| `COMPLAINANT_ID` | `123456782` | 9-digit ID; the pipeline logs a warning (never the value) if the checksum fails |
-| `COMPLAINANT_ADDRESS` | `רחוב הדוגמה 1, ירושלים` | Form field כתובת |
-| `COMPLAINANT_PHONE` | `050-0000000` | Form field טלפון |
-| `PDF_PASSWORD` | `correct-horse-battery-staple` | Opens the encrypted PDF. **Primary for real data** - choose a hard-to-guess value. If unset, TEST_MODE falls back to `COMPLAINANT_ID` (see below) |
-| `RECIPIENT_EMAIL` | `someone@example.com` | Where the filled form is emailed |
-| `SMTP_HOST` | `smtp.gmail.com` | SMTP server (STARTTLS) |
-| `SMTP_PORT` | `587` | Optional; defaults to 587 |
-| `SMTP_USERNAME` | `someone@gmail.com` | Login of the sender account |
-| `SMTP_APP_PASSWORD` | `abcd efgh ijkl mnop` | App password for the sender account; the account owner creates it on their own device (Google Account -> Security -> 2-Step Verification -> App passwords) |
-| `SMTP_FROM` | `someone@gmail.com` | From header and envelope sender |
-| `CASE_DATA_PRIVATE_KEY` | `kD8...base64...` | Sealed-box private key for encrypted case payloads. The matching public key is committed at `form/keys/case-data-public.key`. Not personal data. |
+Replace every placeholder locally or directly in GitHub. Never put real
+values in an issue, PR, repository file, command argument or chat.
 
-Repository/environment **variables** (non-secret):
+```json
+{
+  "version": 1,
+  "complainant": {
+    "first_name": "YOUR_FIRST_NAME",
+    "last_name": "YOUR_LAST_NAME",
+    "id_number": "YOUR_9_DIGIT_ID",
+    "address": "YOUR_ADDRESS",
+    "phone": "YOUR_PHONE"
+  },
+  "pdf_password": "YOUR_STRONG_PDF_PASSWORD",
+  "delivery": {
+    "recipient_email": "YOUR_RECIPIENT_EMAIL",
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587,
+    "smtp_username": "YOUR_SENDER_EMAIL",
+    "smtp_app_password": "YOUR_APP_PASSWORD",
+    "smtp_from": "YOUR_SENDER_EMAIL"
+  }
+}
+```
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `TEST_MODE` | `true` | Watermark + `[בדיקה]` subject. Set `false` only after real values are loaded. |
-| `ENCRYPT_OUTPUT` | `true` | `false` allowed only during the dummy phase (`TEST_MODE=true`). |
+All fields are required. Unknown keys, duplicates, arrays, missing/empty
+fields, wrong types and line breaks in field values are rejected with a
+fixed diagnostic that echoes neither supplied names nor values. The ID
+must be nine ASCII digits with a valid Israeli checksum. The PDF password
+must have at least 16 characters and at most 127 UTF-8 bytes. Choose a long,
+random password; length validation is not an entropy guarantee. SMTP port
+is a JSON integer, not a quoted string (normally 587 for STARTTLS).
 
-## PDF password policy (user decision, 2026-10-26)
+The bundle stays in process memory; it is not split into GITHUB_ENV,
+outputs, command arguments or temporary plaintext configuration files.
+Runtime exception details are withheld because a library can echo secrets.
+Test mode only watermarks the form; it is not proof that identity is fake.
+PDF encryption is therefore mandatory in every mode, without an ID fallback.
 
-Encryption is the PDF's built-in AES-256 password (pikepdf). Resolution:
+`CASE_DATA_PRIVATE_KEY` remains a separate secret for encrypted incident
+payloads. Its existing repository scope is a residual risk described below;
+it has not been migrated automatically. `TEST_MODE` is a non-secret variable
+(default true). `ENCRYPT_OUTPUT=false` now fails closed in every mode.
 
-1. `PDF_PASSWORD` set -> used. This is the documented primary for real
-   data; the user loads a hard-to-guess value himself.
-2. Unset and `TEST_MODE=true` -> the complainant ID number opens the file.
-   Accepted tradeoff: a 9-digit ID is low-entropy and offline-brute-forceable
-   against a captured file, so this fallback exists for test data only.
-3. Unset and `TEST_MODE=false` -> the run fails before any work, reporting
-   the secret by NAME only. Real data never ships under the ID fallback.
+## Cutover and removal
 
-The password value never appears in logs, the PDF filename or the email.
+1. Load the complete FILING_BUNDLE into filing directly in GitHub.
+2. Merge the bundle-only workflow after green CI. If merged before loading,
+   filing fails closed until the bundle is present. No dual-source period.
+3. Make an owner-authorized verification run and confirm delivery/decryption.
+4. Only after that succeeds, delete these old individual secrets wherever
+   they exist (filing, repository or accessible organization scope):
+   COMPLAINANT_FIRST_NAME, COMPLAINANT_LAST_NAME, COMPLAINANT_ID,
+   COMPLAINANT_ADDRESS, COMPLAINANT_PHONE, PDF_PASSWORD, RECIPIENT_EMAIL,
+   SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_APP_PASSWORD, SMTP_FROM.
+5. Verify deletion by listing names only. Keep FILING_BUNDLE and
+   CASE_DATA_PRIVATE_KEY. Cancel or do not approve old queued runs: runs on
+   old commits still use the old workflow. Do not rerun those after cutover.
 
-## Loading via the UI
+Existing PDFs keep their original passwords; replacing the bundle does not
+re-encrypt previous files. GitHub secrets cannot be read back for migration.
 
-Settings -> Secrets and variables -> Actions -> Environment secrets
-(`filing` environment) -> New secret, one per row above. Variables go under
-the Variables tab.
+## Threat model and trust boundary
 
-## Swapping dummy -> real
+Bundling prevents a person who can **only replace a secret** from changing
+just the PDF password or delivery destination while keeping an unknown old
+identity. Replacing the bundle replaces all those fields. Strict validation
+rejects partial replacements rather than combining them with legacy values.
+It is not cryptographic protection against code authors or administrators.
 
-Replace each value in place; no code change is needed. After real values are
-in: set `TEST_MODE=false` and `ENCRYPT_OUTPUT=true` (the CLI refuses
-`ENCRYPT_OUTPUT=false` outside test mode).
+At the October 26 audit, both repository collaborators (`reihl` and
+`reihlinstinct`) have admin rights. main requires green CI but zero approving
+reviews; CODEOWNERS alone is not enforced review. filing lists both accounts
+as reviewers: **either one** can approve, not both; self-review is permitted
+and admin bypass enabled. These choices are retained, not represented as
+separation of duties. Admins can also change the protection rules themselves.
+
+The environment is restricted to the main branch, and the checked-in
+workflow also refuses non-main refs. The environment branch rule is the
+real protection against a rewritten workflow on another branch. A malicious
+change merged into main can still read and exfiltrate the entire bundle
+when approved. An independent owner review of every workflow/runtime change,
+restricted admin access, no admin bypass and independent deployment approval
+are needed if distrust of the code author is a requirement.
+
+At audit time SMTP_APP_PASSWORD and CASE_DATA_PRIVATE_KEY are repository
+secrets, while the ten other configured individual fields are in filing.
+Repository secrets are not protected by an environment gate. The old SMTP
+password is removed after the bundle test. Moving the case-data private key
+requires a separate owner-controlled migration; it remains a known risk.
+
+Ordinary fork PRs do not receive Actions secrets; CI approval is not approval
+to expose secrets. Never run untrusted PR code in a privileged context (for
+example pull_request_target with PR checkout). Same-repository writers may
+change workflows or reference repository secrets, so require code review and
+keep sensitive credentials in filing. Steps receiving the bundle are scoped
+to the application invocation, not checkout/dependency installation. This
+reduces accidental exposure but does not sandbox malicious runtime code or
+dependencies. CI tests check known logging paths, not arbitrary future code;
+GitHub masking of a JSON blob is not reliable masking of extracted fields.
+
+Official references:
+- https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions
+- https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
