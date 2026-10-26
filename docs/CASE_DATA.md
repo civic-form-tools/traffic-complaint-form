@@ -65,7 +65,7 @@ One JSON object per complaint. Keys not listed here are ignored.
 | `offence_description` | yes | short free text (one row of the table) |
 | `offence_junction_or_house` | no | string |
 | `offence_day` | no | Hebrew weekday; derived from the date when blank |
-| `municipal_case` | no | municipal report reference |
+| `municipal_case` | no | municipal (106) report reference; the table labels it "דיווח לעירייה", never a police ticket number |
 
 With `incidents`, the top-level `offence_*` keys are not required. Keep
 descriptions short: the merged form allows at most 3 pages.

@@ -86,7 +86,7 @@ def _incidents_table_html(case: CaseData) -> str:
     return (
         '<table class="incidents"><thead><tr>'
         "<th>#</th><th>תאריך</th><th>יום</th><th>שעה</th><th>מיקום</th>"
-        "<th>תיאור העבירה</th><th>אסמכתא (מס' דוח)</th>"
+        "<th>תיאור העבירה</th><th>אסמכתא (דיווח לעירייה)</th>"
         "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
     )
 
@@ -98,9 +98,9 @@ def _offence_block_html(case: CaseData) -> str:
             f'<p>תאריך <span class="blank">{case.offence.date.strftime("%d/%m/%Y")}</span>'
             f' יום <span class="blank">{_escape(case.offence.day)}</span>'
             f' שעה <span class="blank">{_escape(case.offence.time)}</span>'
-            f" , רח'/כביש "
+            f" , רחֳ/כביש "
             f'<span class="blank wide">{_escape(case.offence.street)}</span></p>\n'
-            f"<p>צומת רח'/כביש ו/או מס' בית "
+            f"<p>צומת רחֳ/כביש ו/או מסֳ בית "
             f'<span class="blank wide">{_escape(case.offence.junction_or_house)}</span>'
             f' עיר <span class="blank">{_escape(case.offence.city)}</span></p>'
         )
@@ -115,7 +115,7 @@ def _description_block_html(case: CaseData) -> str:
     count = len(case.incidents)
     return (
         f'<div class="desc multi">ב-{count} המועדים המפורטים בטבלה שלעיל, הרכב ביצע את העבירות '
-        'המצוינות לכל מועד בעמודה "תיאור העבירה".</div>'
+        "המצוינות לכל מועד בעמודה ִתיאור העבירהִ.</div>"
     )
 
 
