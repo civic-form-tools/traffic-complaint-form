@@ -225,6 +225,22 @@ def test_validate_codes_never_echo_caller_values():
         assert SENTINEL not in json.dumps(result, ensure_ascii=False), result
 
 
+def test_validate_codes_never_echo_impossible_dates():
+    """Shape-valid but impossible dates reach strptime; its message must not leak the value."""
+    for case in ({**CASE, "offence_date": "2026-13-45"}, {**CASE, "complaint_date": "2026-02-30"}):
+        result = mcp_server.validate_filing(case, **OVERRIDE_ARGS)
+        assert result["ok"] is False
+        text = json.dumps(result, ensure_ascii=False)
+        assert "2026-13-45" not in text and "2026-02-30" not in text and "13-45" not in text
+
+
+def test_validate_rejects_unicode_and_wrong_length_plates():
+    """ASCII digits only, exactly 7 or 8: the subject interpolates vehicle_number."""
+    for plate in ("١٢-٣٤٥-٦٧", "12-34-56", "123-456-78", "1-2-3"):
+        result = mcp_server.validate_filing({**CASE, "vehicle_number": plate}, **OVERRIDE_ARGS)
+        assert result["ok"] is False, plate
+
+
 def test_validate_rejects_non_plate_vehicle_number():
     """The delivery subject interpolates vehicle_number; it must be plate-shaped."""
     result = mcp_server.validate_filing({**CASE, "vehicle_number": "click http://evil.example"}, **OVERRIDE_ARGS)

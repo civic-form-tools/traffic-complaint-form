@@ -28,13 +28,13 @@ HEBREW_WEEKDAYS = {
     6: "ראשון",
 }
 
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")  # [0-9], not \d: keep Unicode digits out
 # Israeli plates are digits and hyphens only (7 or 8 digits). The subject of
 # the delivery email interpolates vehicle_number, and in per-call mode the
 # caller picks both it and the recipient - so free text here would be a
 # phishing channel from the project's sender.
-PLATE_RE = re.compile(r"^\d{2,3}-\d{2,3}-\d{2,3}$")
-TIME_RE = re.compile(r"^\d{2}:\d{2}$")
+PLATE_RE = re.compile(r"^(?:[0-9]{2}-[0-9]{3}-[0-9]{2}|[0-9]{3}-[0-9]{2}-[0-9]{3})$")  # 7 or 8 ASCII digits
+TIME_RE = re.compile(r"^[0-9]{2}:[0-9]{2}$")
 
 # Nothing is submitted to a station - the PDF is only emailed to the complainant
 # for review - so the station line is a formality. Default per user decision.
@@ -99,7 +99,12 @@ def parse_iso_date(value: str, *, field_name: str) -> date:
     text = (value or "").strip()
     if not DATE_RE.match(text):
         raise ValueError(f"{field_name} must be YYYY-MM-DD")
-    return datetime.strptime(text, "%Y-%m-%d").date()
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        # A shape-valid but impossible date reaches strptime, whose message
+        # quotes the input - diagnostics must stay value-free.
+        raise ValueError(f"{field_name} must be a real YYYY-MM-DD date") from None
 
 
 def hebrew_weekday(day: date) -> str:

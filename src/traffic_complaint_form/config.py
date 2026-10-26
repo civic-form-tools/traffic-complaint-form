@@ -79,12 +79,20 @@ def _text(value: object, code: str = "schema", error: type[ValueError] = BundleE
 
 def _email(value: object, code: str = "schema", error: type[ValueError] = BundleError) -> str:
     text = _text(value, code, error)
+    # Reject surrounding whitespace and any space/control byte outright: the
+    # recipient is the most caller-controlled field and lenient parsing here
+    # only helps smuggling (e.g. a trailing tab).
+    if text != text.strip() or any(ord(ch) < 33 or ord(ch) == 127 for ch in text):
+        raise error(code)
     try:
         address = Address(addr_spec=text)
         if not address.username or not address.domain:
             raise ValueError
     except Exception:  # header parse errors can echo the supplied value - never propagate them
         raise error(code) from None
+    # Dotted host domain only - no IP literals, no bare hostnames.
+    if "." not in address.domain or "[" in address.domain or "]" in address.domain:
+        raise error(code)
     return text
 
 

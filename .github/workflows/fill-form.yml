@@ -40,7 +40,12 @@ jobs:
         run: |
           set -euo pipefail
           today="$(date -u +%F)"
-          count="$(curl -sf --get             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/fill-form.yml/runs"             --data-urlencode "created=>=${today}" --data-urlencode per_page=1             | python3 -c 'import json,sys; print(json.load(sys.stdin)["total_count"])')"
+          count="$(curl -sf --get \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/fill-form.yml/runs" \
+            --data-urlencode "created=>=${today}" --data-urlencode per_page=1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["total_count"])')"
           echo "fill-form runs today (UTC day): $count (cap $DAILY_CAP, this run included)"
           if [ "$count" -gt "$DAILY_CAP" ]; then
             echo "Daily dispatch cap reached - refusing to run (abuse control, see docs/MCP.md)"

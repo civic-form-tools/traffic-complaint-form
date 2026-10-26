@@ -169,7 +169,10 @@ def test_override_password_rules(bad):
     assert err.value.code == "pdf_password"
 
 
-@pytest.mark.parametrize("bad", ["not-an-email", "@example.com", "a@b\nc", ""])
+@pytest.mark.parametrize(
+    "bad",
+    ["not-an-email", "@example.com", "a@b\nc", "", "a@b.com\t", " a@b.com", "a@b.com ", "a@[127.0.0.1]", "a@localhost"],
+)
 def test_override_email_validation(bad):
     payload = dict(OVERRIDE, recipient_email=bad)
     with pytest.raises(PayloadError) as err:
