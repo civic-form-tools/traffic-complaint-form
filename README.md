@@ -23,10 +23,10 @@ private key (also a Secret) can open.
 flowchart LR
     A["workflow_dispatch inputs<br>sample / non-sensitive case JSON<br>or sealed-box encrypted payload"] --> C["fill + render<br>WeasyPrint (RTL Hebrew)"]
     K["repo public key<br>form/keys/case-data-public.key"] -. callers encrypt .-> A
-    S[("GitHub Secrets (environment: filing)<br>complainant identity, PDF password,<br>recipient email, SMTP app password,<br>case-data private key")] --> C
+    S[("GitHub Secrets (environment: filing)<br>complainant identity, PDF password,<br>recipient email, SMTP settings + app password,<br>case-data private key")] --> C
     C --> D["pikepdf AES-256 encrypt<br>(switchable: ENCRYPT_OUTPUT)"]
     D --> V["verify: password required,<br>exactly 1 page"]
-    V --> M["Gmail SMTP (STARTTLS,<br>app password)"]
+    V --> M["SMTP (STARTTLS, app password)<br>host/port/from all secret-driven"]
     M --> E["recipient inbox"]
 ```
 
@@ -39,7 +39,7 @@ exposed to the job.
 Secrets (see [docs/SECRETS.md](docs/SECRETS.md) for the full specification):
 `COMPLAINANT_FIRST_NAME`, `COMPLAINANT_LAST_NAME`, `COMPLAINANT_ID`,
 `COMPLAINANT_ADDRESS`, `COMPLAINANT_PHONE`, `PDF_PASSWORD`, `RECIPIENT_EMAIL`,
-`SMTP_USERNAME`, `SMTP_APP_PASSWORD`, `CASE_DATA_PRIVATE_KEY`.
+`SMTP_HOST`, `SMTP_PORT` (optional, default 587), `SMTP_USERNAME`, `SMTP_APP_PASSWORD`, `SMTP_FROM`, `CASE_DATA_PRIVATE_KEY`.
 
 Repository/environment variables:
 

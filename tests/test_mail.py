@@ -18,8 +18,11 @@ def test_send_flow_uses_tls_and_login(tmp_path):
     attachment.write_bytes(b"%PDF-1.7 fake")
     factory, server = make_smtp()
     send_encrypted_pdf(
+        smtp_host="smtp.example.com",
+        smtp_port=587,
         smtp_username="sender@example.com",
         smtp_password="app-password",
+        from_address="sender@example.com",
         recipient="dest@example.com",
         attachment_path=attachment,
         vehicle_number="12-345-67",
@@ -42,8 +45,11 @@ def test_test_mode_prefixes_subject(tmp_path):
     attachment.write_bytes(b"%PDF-1.7 fake")
     factory, server = make_smtp()
     send_encrypted_pdf(
+        smtp_host="smtp.example.com",
+        smtp_port=587,
         smtp_username="s",
         smtp_password="p",
+        from_address="sender@example.com",
         recipient="d",
         attachment_path=attachment,
         vehicle_number="1",
@@ -62,8 +68,11 @@ def test_refused_recipient_raises(tmp_path):
     server.send_message.return_value = {"dest@example.com": (550, b"no")}
     with pytest.raises(RuntimeError, match="refused"):
         send_encrypted_pdf(
+            smtp_host="smtp.example.com",
+            smtp_port=587,
             smtp_username="s",
             smtp_password="p",
+            from_address="sender@example.com",
             recipient="dest@example.com",
             attachment_path=attachment,
             vehicle_number="1",
@@ -80,8 +89,11 @@ def test_no_credentials_in_logs(tmp_path, caplog):
 
     with caplog.at_level(logging.INFO):
         send_encrypted_pdf(
+            smtp_host="smtp.example.com",
+            smtp_port=587,
             smtp_username="sender@example.com",
             smtp_password="super-secret-pw",
+            from_address="sender@example.com",
             recipient="dest@example.com",
             attachment_path=attachment,
             vehicle_number="1",

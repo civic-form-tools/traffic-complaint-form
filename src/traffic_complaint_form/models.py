@@ -42,9 +42,15 @@ COMPLAINANT_ENV_VARS = (
 DELIVERY_ENV_VARS = (
     "PDF_PASSWORD",
     "RECIPIENT_EMAIL",
+    "SMTP_HOST",
+    "SMTP_PORT",
     "SMTP_USERNAME",
     "SMTP_APP_PASSWORD",
+    "SMTP_FROM",
 )
+
+# SMTP_PORT is optional (default 587); all other delivery secrets are required to send.
+OPTIONAL_DELIVERY_ENV_VARS = {"SMTP_PORT"}
 
 
 class TriState(Enum):
