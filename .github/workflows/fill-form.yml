@@ -1,0 +1,160 @@
+name: Fill and send complaint form
+
+on:
+  workflow_dispatch:
+    inputs:
+      encrypted_case:
+        description: "מטען מוצפן (sealed box, base64) של נתוני התיק - לשימוש בנתונים אמיתיים; לא להדביק נתונים גלויים"
+        required: false
+        default: ""
+      police_station: {description: "משטרת (לשכת התנועה)", required: false, default: "מוריה"}
+      vehicle_number: {description: "מס' רכב", required: false, default: ""}
+      vehicle_manufacturer: {description: "יצרן", required: false, default: ""}
+      vehicle_color: {description: "צבע", required: false, default: ""}
+      vehicle_type: {description: "סוג רכב", required: false, default: ""}
+      driver_name: {description: "שם הנהג (באם ידוע)", required: false, default: ""}
+      driver_address: {description: "כתובת הנהג (באם ידוע)", required: false, default: ""}
+      can_identify_driver: {description: "יכול לזהות את הנהג", type: choice, options: [unknown, yes, no], default: unknown}
+      driver_identifying_marks: {description: "סימני זיהוי מיוחדים", required: false, default: ""}
+      knows_driver: {description: "קיימת היכרות עם הנילו\"ע", type: choice, options: [unknown, yes, no], default: unknown}
+      offence_date: {description: "תאריך העבירה YYYY-MM-DD", required: false, default: ""}
+      offence_day: {description: "יום בשבוע (מחושב מהתאריך אם ריק)", required: false, default: ""}
+      offence_time: {description: "שעת העבירה HH:MM", required: false, default: ""}
+      offence_street: {description: "רח'/כביש", required: false, default: ""}
+      offence_junction_or_house: {description: "צומת רח'/כביש ו/או מס' בית", required: false, default: ""}
+      offence_city: {description: "עיר", required: false, default: "ירושלים"}
+      offence_description: {description: "תיאור העבירה", required: false, default: ""}
+      willing_to_testify: {description: "מוכן להעיד בבימ\"ש", type: choice, options: [yes, no], default: yes}
+      witness_name: {description: "עד - שם", required: false, default: ""}
+      witness_id: {description: "עד - מס' ת.ז.", required: false, default: ""}
+      witness_phone: {description: "עד - טלפון", required: false, default: ""}
+      witness_address: {description: "עד - כתובת", required: false, default: ""}
+      complaint_date: {description: "תאריך התלונה (ברירת מחדל: היום, Asia/Jerusalem)", required: false, default: ""}
+      sample_data: {description: "מלא נתוני דוגמה בדייקניים (לבדיקת צינור)", type: boolean, default: false}
+      dry_run: {description: "בנה והצפן בלבד, אל תשלח מייל", type: boolean, default: false}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fill-form
+  cancel-in-progress: false
+
+jobs:
+  fill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: filing # required reviewers gate every run before secrets are exposed
+    env:
+      TEST_MODE: ${{ vars.TEST_MODE }}
+      ENCRYPT_OUTPUT: ${{ vars.ENCRYPT_OUTPUT }}
+      COMPLAINANT_FIRST_NAME: ${{ secrets.COMPLAINANT_FIRST_NAME }}
+      COMPLAINANT_LAST_NAME: ${{ secrets.COMPLAINANT_LAST_NAME }}
+      COMPLAINANT_ID: ${{ secrets.COMPLAINANT_ID }}
+      COMPLAINANT_ADDRESS: ${{ secrets.COMPLAINANT_ADDRESS }}
+      COMPLAINANT_PHONE: ${{ secrets.COMPLAINANT_PHONE }}
+      PDF_PASSWORD: ${{ secrets.PDF_PASSWORD }}
+      RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+      CASE_DATA_PRIVATE_KEY: ${{ secrets.CASE_DATA_PRIVATE_KEY }}
+    steps:
+      - name: Validate required secrets (names only, fail fast)
+        run: |
+          missing=""
+          for name in COMPLAINANT_FIRST_NAME COMPLAINANT_LAST_NAME COMPLAINANT_ID COMPLAINANT_ADDRESS COMPLAINANT_PHONE; do
+            [ -z "${!name}" ] && missing="$missing $name"
+          done
+          if [ "${ENCRYPT_OUTPUT:-true}" != "false" ] && [ -z "$PDF_PASSWORD" ]; then missing="$missing PDF_PASSWORD"; fi
+          if [ "${{ inputs.dry_run }}" != "true" ]; then
+            for name in RECIPIENT_EMAIL SMTP_USERNAME SMTP_APP_PASSWORD; do
+              [ -z "${!name}" ] && missing="$missing $name"
+            done
+          fi
+          if [ -n "${{ inputs.encrypted_case }}" ] && [ -z "$CASE_DATA_PRIVATE_KEY" ]; then missing="$missing CASE_DATA_PRIVATE_KEY"; fi
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required secrets (names only):$missing"
+            exit 1
+          fi
+          echo "All required secrets are configured."
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: System libraries for WeasyPrint and Hebrew fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
+            fonts-noto-core fonts-dejavu
+
+      - run: pip install -e .
+
+      - name: Build case payload
+        run: |
+          if [ -n "${{ inputs.encrypted_case }}" ]; then
+            printf '%s' '${{ inputs.encrypted_case }}' > /tmp/case.enc
+            echo "MODE=encrypted" >> "$GITHUB_ENV"
+          elif [ "${{ inputs.sample_data }}" = "true" ]; then
+            echo "MODE=sample" >> "$GITHUB_ENV"
+          else
+            jq -n \
+              --arg police_station '${{ inputs.police_station }}' \
+              --arg vehicle_number '${{ inputs.vehicle_number }}' \
+              --arg vehicle_manufacturer '${{ inputs.vehicle_manufacturer }}' \
+              --arg vehicle_color '${{ inputs.vehicle_color }}' \
+              --arg vehicle_type '${{ inputs.vehicle_type }}' \
+              --arg driver_name '${{ inputs.driver_name }}' \
+              --arg driver_address '${{ inputs.driver_address }}' \
+              --arg can_identify_driver '${{ inputs.can_identify_driver }}' \
+              --arg driver_identifying_marks '${{ inputs.driver_identifying_marks }}' \
+              --arg knows_driver '${{ inputs.knows_driver }}' \
+              --arg offence_date '${{ inputs.offence_date }}' \
+              --arg offence_day '${{ inputs.offence_day }}' \
+              --arg offence_time '${{ inputs.offence_time }}' \
+              --arg offence_street '${{ inputs.offence_street }}' \
+              --arg offence_junction_or_house '${{ inputs.offence_junction_or_house }}' \
+              --arg offence_city '${{ inputs.offence_city }}' \
+              --arg offence_description '${{ inputs.offence_description }}' \
+              --arg willing_to_testify '${{ inputs.willing_to_testify }}' \
+              --arg witness_name '${{ inputs.witness_name }}' \
+              --arg witness_id '${{ inputs.witness_id }}' \
+              --arg witness_phone '${{ inputs.witness_phone }}' \
+              --arg witness_address '${{ inputs.witness_address }}' \
+              --arg complaint_date '${{ inputs.complaint_date }}' \
+              '{police_station:$police_station,vehicle_number:$vehicle_number,vehicle_manufacturer:$vehicle_manufacturer,vehicle_color:$vehicle_color,vehicle_type:$vehicle_type,driver_name:$driver_name,driver_address:$driver_address,can_identify_driver:$can_identify_driver,driver_identifying_marks:$driver_identifying_marks,knows_driver:$knows_driver,offence_date:$offence_date,offence_day:$offence_day,offence_time:$offence_time,offence_street:$offence_street,offence_junction_or_house:$offence_junction_or_house,offence_city:$offence_city,offence_description:$offence_description,willing_to_testify:$willing_to_testify,witness_name:$witness_name,witness_id:$witness_id,witness_phone:$witness_phone,witness_address:$witness_address,complaint_date:$complaint_date}' > /tmp/case.json
+            echo "MODE=json" >> "$GITHUB_ENV"
+          fi
+
+      - name: Fill, verify and send
+        run: |
+          set -e
+          case "$MODE" in
+            encrypted) python -m traffic_complaint_form --case-encrypted /tmp/case.enc --out-dir out ${DRY:+--dry-run} ;;
+            sample)    python -m traffic_complaint_form --sample --out-dir out ${DRY:+--dry-run} ;;
+            json)      python -m traffic_complaint_form --case-json /tmp/case.json --out-dir out ${DRY:+--dry-run} ;;
+          esac
+        env:
+          DRY: ${{ inputs.dry_run && '1' || '' }}
+
+      - name: Post-run verification summary
+        run: |
+          python3 - <<'PY'
+          import os, glob
+          files = glob.glob("out/*.pdf")
+          assert len(files) == 1, f"expected exactly one output PDF, found {files}"
+          size = os.path.getsize(files[0])
+          assert size > 10_000, f"output suspiciously small: {size}"
+          import pikepdf
+          if os.environ.get("ENCRYPT_OUTPUT", "true").lower() != "false":
+              try:
+                  pikepdf.open(files[0])
+                  raise SystemExit("output opens WITHOUT a password - refusing to finish green")
+              except pikepdf.PasswordError:
+                  pass
+          print(f"verification OK: one PDF, {size} bytes, encryption state as configured")
+          PY

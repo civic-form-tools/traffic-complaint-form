@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>תלונה על עבירת תנועה</title>
+<style>
+@page { size: A4; margin: 9mm 12mm 10mm 12mm; }
+* { box-sizing: border-box; }
+body { font-family: "Noto Sans Hebrew", "DejaVu Sans", sans-serif; font-size: 10pt; color: #111; margin: 0; direction: rtl; }
+.header-band img { width: 100%; }
+.head-row { display: flex; justify-content: space-between; margin-top: 3mm; }
+.subject { text-align: center; font-weight: bold; text-decoration: underline; margin: 4mm 0 3mm; font-size: 12pt; }
+h2 { font-size: 10.5pt; text-decoration: underline; margin: 3.6mm 0 1.4mm; }
+p { margin: 1.2mm 0; line-height: 1.85; }
+.blank { display: inline-block; min-width: 20mm; border-bottom: 0.4pt solid #333; text-align: center; padding: 0 1.5mm; font-weight: 600; }
+.blank.wide { min-width: 42mm; }
+.blank.xwide { min-width: 60mm; }
+.strike { text-decoration: line-through; }
+.desc { line-height: 2.05; min-height: 40mm; padding: 0 1mm;
+  background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(2.05em - 1px), #777 calc(2.05em - 1px), #777 2.05em); }
+.footer { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 4mm; border-top: 0.6pt solid #333; padding-top: 1.6mm; }
+.footer img { height: 10mm; }
+.footer .site { text-decoration: underline; }
+.muted { color: #333; font-size: 8.5pt; }
+.watermark { position: fixed; top: 40%; right: 2%; width: 96%; text-align: center; transform: rotate(-32deg);
+  font-size: 46pt; font-weight: bold; color: rgba(180, 30, 30, 0.16); z-index: 100; }
+</style>
+</head>
+<body>
+$WATERMARK
+<div class="header-band"><img src="assets/header-band.png" alt=""></div>
+<div class="head-row">
+  <div>אל: לשכת התנועה<br>משטרת <span class="blank">$STATION</span></div>
+  <div>תאריך <span class="blank">$COMPLAINT_DATE</span></div>
+</div>
+<div class="subject">הנדון: תלונה על עבירת תנועה</div>
+
+<h2>פרטי רכב הנילו&quot;ו:</h2>
+<p>מס' רכב <span class="blank">$VEHICLE_NUMBER</span> , יצרן <span class="blank">$VEHICLE_MANUFACTURER</span> , צבע <span class="blank">$VEHICLE_COLOR</span> , סוג <span class="blank">$VEHICLE_TYPE</span> , שם הנהג (באם ידוע) <span class="blank">$DRIVER_NAME</span> .</p>
+<p>כתובת (באם ידוע) <span class="blank xwide">$DRIVER_ADDRESS</span></p>
+<p>יכול לזהות הנהג $CAN_IDENTIFY_DRIVER (למחוק את המיותר)</p>
+<p>סימני זיהוי מיוחדים: <span class="blank wide">$DRIVER_MARKS</span> <span class="muted">( מוצא, גיל, צבע שיער)</span></p>
+<p>האם קיימת היכרות עם הנילו&quot;ע $KNOWS_DRIVER (למחוק את המיותר)</p>
+
+<h2>פרטי העבירה:</h2>
+<p>תאריך <span class="blank">$OFFENCE_DATE</span> יום <span class="blank">$OFFENCE_DAY</span> שעה <span class="blank">$OFFENCE_TIME</span> , רח'/כביש <span class="blank wide">$OFFENCE_STREET</span></p>
+<p>צומת רח'/כביש ו/או מס' בית <span class="blank wide">$OFFENCE_JUNCTION</span> עיר <span class="blank">$OFFENCE_CITY</span></p>
+
+<h2>תיאור העבירה:</h2>
+<div class="desc">$OFFENCE_DESCRIPTION</div>
+
+<h2>פרטי המתלונן:</h2>
+<p>שם: <span class="blank">$C_FIRST_NAME</span> , משפחה: <span class="blank">$C_LAST_NAME</span> , ת.ז.: <span class="blank">$C_ID</span> , כתובת: <span class="blank wide">$C_ADDRESS</span></p>
+<p>טלפון: <span class="blank wide">$C_PHONE</span> . מוכן להעיד בבימ&quot;ש $WILLING_TO_TESTIFY (למחוק את המיותר)</p>
+<p>עדים: שם: <span class="blank">$WITNESS_NAME</span> , מס' ת.ז. <span class="blank">$WITNESS_ID</span> , טלפון <span class="blank">$WITNESS_PHONE</span> כתובת: <span class="blank wide">$WITNESS_ADDRESS</span></p>
+
+<div class="footer">
+  <span class="site">www.police.gov.il</span>
+  <span>אגף התנועה מחוז ירושלים</span>
+  <img src="assets/footer-logo.png" alt="אגף התנועה מחוז ירושלים">
+</div>
+</body>
+</html>
