@@ -43,21 +43,37 @@ def _public_key(monkeypatch):
 
 
 class FakeGitHub:
-    """Records calls; serves canned dispatch/list/status responses."""
+    """Records calls; serves canned dispatch/list/status responses.
 
-    def __init__(self, *, post_status=204, runs=None, run=None):
+    After a POST (dispatch), the run list contains a decoy run (someone
+    else's concurrent dispatch) plus our own run, named with the nonce the
+    dispatcher sent - like the real workflow's run-name.
+    """
+
+    def __init__(self, *, post_status=204, run=None, show_own_run=True):
         self.calls = []
         self.post_status = post_status
-        self.runs = runs or []
         self.run = run or {}
+        self.nonce = None
+        self.show_own_run = show_own_run
 
     def __call__(self, method, path, *, token, json_body=None, params=None):
         self.calls.append({"method": method, "path": path, "json": json_body, "params": params, "token": token})
         if method == "POST":
+            self.nonce = (json_body or {}).get("inputs", {}).get("dispatch_nonce")
             return self.post_status, ({} if self.post_status == 204 else {"message": "Forbidden"})
         if "/actions/runs/" in path:
             return 200, self.run
-        return 200, {"workflow_runs": self.runs}
+        decoy = {"id": 99, "name": "fill-form d3c0y99", "html_url": "https://example.com/run/99", "status": "queued"}
+        mine = {
+            "id": 42,
+            "name": f"fill-form {self.nonce}",
+            "html_url": "https://example.com/run/42",
+            "status": "queued",
+        }
+        if not self.nonce:
+            return 200, {"workflow_runs": []}
+        return 200, {"workflow_runs": [decoy, mine] if self.show_own_run else [decoy]}
 
 
 # --- validate_filing ---
@@ -115,7 +131,7 @@ def test_dispatch_requires_token():
 
 def test_dispatch_happy_path(monkeypatch):
     monkeypatch.setenv(mcp_server.TOKEN_ENV, "invented-token")
-    fake = FakeGitHub(runs=[{"id": 42, "html_url": "https://example.com/run/42", "status": "queued"}])
+    fake = FakeGitHub()
     monkeypatch.setattr(mcp_server, "_github_request", fake)
     result = mcp_server.dispatch_filing(CASE, **OVERRIDE_ARGS, wait_seconds=0)
     assert result["ok"] is True and result["run_id"] == 42
@@ -125,11 +141,22 @@ def test_dispatch_happy_path(monkeypatch):
     assert post["method"] == "POST"
     assert post["path"].endswith("/actions/workflows/fill-form.yml/dispatches")
     assert post["json"]["ref"] == "main"
-    assert set(post["json"]["inputs"]) == {"encrypted_case"}
-    # Only ciphertext crosses to GitHub - never per-call values
+    assert set(post["json"]["inputs"]) == {"encrypted_case", "dispatch_nonce"}
+    assert len(post["json"]["inputs"]["dispatch_nonce"]) == 16
+    # Only ciphertext and a random nonce cross to GitHub - never per-call values
     blob = json.dumps(post["json"])
     for value in ("invented-per-call-password", "caller@example.com", "000000018"):
         assert value not in blob
+
+
+def test_find_run_matches_our_nonce_not_a_concurrent_run(monkeypatch):
+    """A concurrent dispatch by someone else must never be returned as ours."""
+    monkeypatch.setenv(mcp_server.TOKEN_ENV, "invented-token")
+    fake = FakeGitHub()
+    monkeypatch.setattr(mcp_server, "_github_request", fake)
+    result = mcp_server.dispatch_filing(CASE, **OVERRIDE_ARGS, wait_seconds=0)
+    assert result["run_id"] == 42  # ours, not the decoy's 99
+    assert result["run_url"].endswith("/42")
 
 
 def test_dispatch_github_error(monkeypatch):
@@ -142,7 +169,7 @@ def test_dispatch_github_error(monkeypatch):
 
 def test_dispatch_run_not_yet_visible(monkeypatch):
     monkeypatch.setenv(mcp_server.TOKEN_ENV, "invented-token")
-    fake = FakeGitHub(runs=[])
+    fake = FakeGitHub(show_own_run=False)  # only a concurrent decoy run is visible
     monkeypatch.setattr(mcp_server, "_github_request", fake)
     result = mcp_server.dispatch_filing(CASE, **OVERRIDE_ARGS, wait_seconds=0)
     assert result["ok"] is True and result["run_id"] is None and result["status"] == "unknown"
@@ -174,3 +201,60 @@ def test_build_server_registers_all_tools():
     server = mcp_server.build_server()
     assert server.name == "traffic-complaint-form"
     assert "never" in server.instructions and "stored" in server.instructions
+
+
+# --- Review findings regressions (PR #34 review) ---
+
+SENTINEL = "SENTINEL-xq9z-never-appear"
+
+
+def test_validate_codes_never_echo_caller_values():
+    """Every from_dict error path returns field names/codes, never supplied values."""
+    cases = [
+        {**CASE, "knows_driver": SENTINEL},
+        {**CASE, "can_identify_driver": SENTINEL},
+        {**CASE, "willing_to_testify": SENTINEL},
+        {**CASE, "offence_date": SENTINEL},
+        {**CASE, "offence_time": SENTINEL},
+        {**CASE, "vehicle_number": SENTINEL},
+        {**CASE, "incidents": [{"offence_date": SENTINEL}]},
+    ]
+    for case in cases:
+        result = mcp_server.validate_filing(case, **OVERRIDE_ARGS)
+        assert result["ok"] is False
+        assert SENTINEL not in json.dumps(result, ensure_ascii=False), result
+
+
+def test_validate_rejects_non_plate_vehicle_number():
+    """The delivery subject interpolates vehicle_number; it must be plate-shaped."""
+    result = mcp_server.validate_filing({**CASE, "vehicle_number": "click http://evil.example"}, **OVERRIDE_ARGS)
+    assert result["ok"] is False
+    assert any("plate" in code for code in result["codes"])
+    for plate in ("12-345-67", "123-45-678"):
+        assert mcp_server.validate_filing({**CASE, "vehicle_number": plate}, **OVERRIDE_ARGS)["ok"] is True
+
+
+def test_dispatch_debug_logs_carry_no_values(monkeypatch, caplog):
+    """At DEBUG, neither our logs nor httpx's request lines carry values or the token."""
+    import logging
+
+    import httpx
+
+    def handler(request):
+        if request.method == "POST":
+            return httpx.Response(204)
+        return httpx.Response(200, json={"workflow_runs": []})
+
+    real_client = httpx.Client
+
+    def client(**kw):
+        kw.pop("transport", None)
+        return real_client(transport=httpx.MockTransport(handler), **kw)
+
+    monkeypatch.setattr(httpx, "Client", client)
+    monkeypatch.setenv(mcp_server.TOKEN_ENV, "invented-token-SENTINEL-token")
+    with caplog.at_level(logging.DEBUG):
+        result = mcp_server.dispatch_filing(CASE, **OVERRIDE_ARGS, wait_seconds=0)
+    assert result["ok"] is True
+    for value in ("invented-per-call-password", "caller@example.com", "000000018", "SENTINEL-token"):
+        assert value not in caplog.text

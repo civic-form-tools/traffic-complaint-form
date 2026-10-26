@@ -65,19 +65,19 @@ class PayloadError(ValueError):
         super().__init__(PAYLOAD_ERROR + "; check: " + self.code)
 
 
-def _object(value: object, keys: set[str], code: str = "schema", error: type[BundleError] = BundleError) -> dict:
+def _object(value: object, keys: set[str], code: str = "schema", error: type[ValueError] = BundleError) -> dict:
     if not isinstance(value, dict) or set(value) != keys:
         raise error(code)
     return value
 
 
-def _text(value: object, code: str = "schema", error: type[BundleError] = BundleError) -> str:
+def _text(value: object, code: str = "schema", error: type[ValueError] = BundleError) -> str:
     if not isinstance(value, str) or not value.strip() or any(c in value for c in "\r\n\x00"):
         raise error(code)
     return value
 
 
-def _email(value: object, code: str = "schema", error: type[BundleError] = BundleError) -> str:
+def _email(value: object, code: str = "schema", error: type[ValueError] = BundleError) -> str:
     text = _text(value, code, error)
     try:
         address = Address(addr_spec=text)

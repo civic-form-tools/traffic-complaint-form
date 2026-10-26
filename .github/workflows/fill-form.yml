@@ -1,8 +1,13 @@
 name: Fill and send complaint form
+run-name: fill-form ${{ inputs.dispatch_nonce }}
 
 on:
   workflow_dispatch:
     inputs:
+      dispatch_nonce:
+        description: "Non-secret correlation id from the MCP dispatcher (random hex); appears in the run name only"
+        required: false
+        default: ""
       encrypted_case:
         description: "מטען מוצפן (sealed box, base64) של נתוני התיק - הערוץ היחיד לנתונים אמיתיים; ריק = נתוני דוגמה"
         required: false

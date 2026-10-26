@@ -29,6 +29,11 @@ HEBREW_WEEKDAYS = {
 }
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Israeli plates are digits and hyphens only (7 or 8 digits). The subject of
+# the delivery email interpolates vehicle_number, and in per-call mode the
+# caller picks both it and the recipient - so free text here would be a
+# phishing channel from the project's sender.
+PLATE_RE = re.compile(r"^\d{2,3}-\d{2,3}-\d{2,3}$")
 TIME_RE = re.compile(r"^\d{2}:\d{2}$")
 
 # Nothing is submitted to a station - the PDF is only emailed to the complainant
@@ -73,7 +78,7 @@ class TriState(Enum):
             return cls.NO
         if normalized in {"", "unknown", "לא ידוע"}:
             return cls.UNKNOWN
-        raise ValueError(f"invalid yes/no value: {value!r}")
+        raise ValueError("invalid yes/no value (expected yes/no/unknown; value withheld)")
 
 
 def is_valid_israeli_id(id_number: str) -> bool:
@@ -230,6 +235,8 @@ class CaseData:
         for key in cls.VEHICLE_REQUIRED:
             if not text(key):
                 problems.append(f"missing required input: {key}")
+        if text("vehicle_number") and not PLATE_RE.match(text("vehicle_number")):
+            problems.append("vehicle_number must be plate-shaped (digits and hyphens)")
 
         def parse_incident(source: Mapping[str, Any], label: str) -> Incident | None:
             """Validate one incident. label identifies the entry by position, never by content."""

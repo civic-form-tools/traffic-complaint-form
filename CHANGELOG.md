@@ -18,6 +18,13 @@
   caller free text.
 - CODEOWNERS now covers `mcp_server.py`; design and threat model in
   docs/MCP.md.
+- Review hardening: `vehicle_number` must be plate-shaped (digits and
+  hyphens) - it interpolates into the delivery email subject, and in
+  per-call mode free text there would be a phishing channel; tri-state
+  validation messages no longer echo the supplied value; dispatch runs are
+  correlated by a random `dispatch_nonce` in the run name, so a concurrent
+  dispatch cannot be misreported as ours; `_email` parse failures can no
+  longer leak values (see below).
 
 - `CASE_DATA_PRIVATE_KEY` moved out of repository secrets into the protected
   `production` environment; the keypair was rotated in the process (GitHub

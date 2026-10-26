@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -163,7 +164,9 @@ def seal_filing(
     return {"ok": True, "ciphertext": ciphertext, "input_name": "encrypted_case", "repo": repo}
 
 
-def _find_run(repo: str, token: str, since: datetime, wait_seconds: float) -> dict:
+def _find_run(repo: str, token: str, since: datetime, wait_seconds: float, nonce: str) -> dict:
+    """Find this dispatch's run by its nonce (in the run name) - a concurrent
+    dispatch by someone else can never be returned as ours."""
     deadline = time.monotonic() + max(0.0, wait_seconds)
     created_after = (since - timedelta(seconds=RUN_DISCOVERY_SKEW_SECONDS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     while True:
@@ -171,13 +174,16 @@ def _find_run(repo: str, token: str, since: datetime, wait_seconds: float) -> di
             "GET",
             f"/repos/{repo}/actions/workflows/{WORKFLOW_FILE}/runs",
             token=token,
-            params={"event": "workflow_dispatch", "created": f">={created_after}", "per_page": "1"},
+            params={"event": "workflow_dispatch", "created": f">={created_after}", "per_page": "10"},
         )
         if status == 200:
-            runs = body.get("workflow_runs") or []
-            if runs:
-                run = runs[0]
-                return {"run_id": run.get("id"), "run_url": run.get("html_url", ""), "status": run.get("status", "")}
+            for run in body.get("workflow_runs") or []:
+                if str(run.get("name", "")).endswith(nonce):
+                    return {
+                        "run_id": run.get("id"),
+                        "run_url": run.get("html_url", ""),
+                        "status": run.get("status", ""),
+                    }
         if time.monotonic() >= deadline:
             return {
                 "run_id": None,
@@ -214,11 +220,12 @@ def dispatch_filing(
         }
     repo = os.environ.get(REPO_ENV, DEFAULT_REPO)
     dispatched_at = datetime.now(timezone.utc)
+    nonce = secrets.token_hex(8)  # non-secret correlation id; appears in the run name
     status, body = _github_request(
         "POST",
         f"/repos/{repo}/actions/workflows/{WORKFLOW_FILE}/dispatches",
         token=token,
-        json_body={"ref": "main", "inputs": {"encrypted_case": sealed["ciphertext"]}},
+        json_body={"ref": "main", "inputs": {"encrypted_case": sealed["ciphertext"], "dispatch_nonce": nonce}},
     )
     if status != 204:
         return {"ok": False, "error": f"github_http_{status}", "message": str(body.get("message", ""))[:200]}
@@ -227,7 +234,7 @@ def dispatch_filing(
         "repo": repo,
         "gate": "the run waits on the production environment approval before any secret is exposed",
     }
-    result.update(_find_run(repo, token, dispatched_at, wait_seconds))
+    result.update(_find_run(repo, token, dispatched_at, wait_seconds, nonce))
     return result
 
 
