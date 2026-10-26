@@ -103,3 +103,12 @@ def test_multi_incident_values_are_escaped(complainant):
     assert "<script>" not in html_text
     assert "&lt;script&gt;" in html_text
     assert case.incidents  # silence unused-variable style complaints
+
+
+def test_hebrew_abbreviations_use_gershayim_not_ascii_quotes(complainant):
+    rendered = render_form(sample_multi_case(), complainant)
+    assert "הנילו\u05b4ו" in rendered
+    assert "הנילו\u05b4ע" in rendered
+    assert "בימ\u05b4ש" in rendered
+    assert "&quot;" not in rendered
+    assert "מס\u05b3 דוח" in rendered  # geresh in the ref column header
