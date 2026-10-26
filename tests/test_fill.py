@@ -105,11 +105,25 @@ def test_multi_incident_values_are_escaped(complainant):
     assert case.incidents  # silence unused-variable style complaints
 
 
-def test_hebrew_abbreviations_use_gershayim_not_ascii_quotes(complainant):
+def test_official_wording_full_word_no_abbreviation(complainant):
+    """User decision 10:01: the accused party is spelled out, no abbreviation."""
     rendered = render_form(sample_multi_case(), complainant)
-    assert "הנילו\u05b4ו" in rendered
-    assert "הנילו\u05b4ע" in rendered
-    assert "בימ\u05b4ש" in rendered
-    assert "&quot;" not in rendered
+    assert "פרטי הרכב הנילון:" in rendered
+    assert "האם קיימת היכרות עם הנילון" in rendered
+    assert "הנילו\u05f4" not in rendered  # no abbreviated form
+    assert 'הנילו"' not in rendered
+
+
+def test_no_niqqud_or_ascii_quotes_in_rendered_text(complainant):
+    """U+05B0-U+05C7 are niqqud vowel points (e.g. hiriq U+05B4) - they must
+    never appear; gershayim is U+05F4 and geresh U+05F3."""
+    import re
+
+    for case in (sample_case(), sample_multi_case()):
+        rendered = render_form(case, complainant)
+        assert not re.findall(r"[\u05b0-\u05c7]", rendered)
+        assert "&quot;" not in rendered
+        assert "בימ\u05f4ש" in rendered  # gershayim, not hiriq
+    rendered = render_form(sample_multi_case(), complainant)
     assert "דיווח לעירייה" in rendered  # refs are municipal (106) reports, not police tickets
-    assert "מס\u05b3 דוח" not in rendered
+    assert "מס\u05f3 דוח" not in rendered

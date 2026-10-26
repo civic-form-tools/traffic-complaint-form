@@ -15,16 +15,23 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+ENCRYPTION_NOTE = (
+    "שים לב: הקובץ מוצפן בכוונה, ולכן שירותי דואר (למשל וואלה) עשויים "
+    "לסמן אזהרת 'unscannable' עליו - זה צפוי ואינו תקלה.\n\n"
+)
+
 BODY_REAL = (
     "מצורף טופס התלונה הממולא, מוצפן בסיסמה.\n"
     "הסיסמה היא הסיסמה הייעודית שהוגדרה ב-GitHub Secret בשם PDF_PASSWORD.\n\n"
-    "הודעה אוטומטית ממערכת traffic-complaint-form."
+    + ENCRYPTION_NOTE
+    + "הודעה אוטומטית ממערכת traffic-complaint-form."
 )
 
 BODY_TEST = (
     "מצורף טופס תלונה לדוגמה, מוצפן בסיסמה.\n"
     "אם הוגדר PDF_PASSWORD - זו הסיסמה; אחרת (ברירת מחדל במצב בדיקה) - מספר תעודת הזהות.\n\n"
-    "הודעה אוטומטית ממערכת traffic-complaint-form."
+    + ENCRYPTION_NOTE
+    + "הודעה אוטומטית ממערכת traffic-complaint-form."
 )
 
 
@@ -45,8 +52,11 @@ def send_encrypted_pdf(
     message = EmailMessage()
     message["From"] = from_address
     message["To"] = recipient
-    prefix = "[בדיקה] " if test_mode else ""
-    message["Subject"] = f"{prefix}תלונה על עבירת תנועה - רכב {vehicle_number} - {offence_date}"
+    # ASCII-only subject: some receiving gateways (e.g. walla) prepend a
+    # warning to the Subject when they cannot scan the encrypted attachment,
+    # which breaks RFC 2047 decoding of a non-ASCII subject.
+    prefix = "[TEST] " if test_mode else ""
+    message["Subject"] = f"{prefix}Traffic complaint form - vehicle {vehicle_number} - {offence_date}"
     message.set_content(BODY_TEST if test_mode else BODY_REAL)
     message.add_attachment(
         attachment_path.read_bytes(),
