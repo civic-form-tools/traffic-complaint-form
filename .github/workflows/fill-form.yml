@@ -14,9 +14,9 @@ on:
       vehicle_type: {description: "סוג רכב", required: false, default: ""}
       driver_name: {description: "שם הנהג (באם ידוע)", required: false, default: ""}
       driver_address: {description: "כתובת הנהג (באם ידוע)", required: false, default: ""}
-      can_identify_driver: {description: "יכול לזהות את הנהג", type: choice, options: [unknown, yes, no], default: unknown}
+      can_identify_driver: {description: "יכול לזהות את הנהג", type: choice, options: ["unknown", "yes", "no"], default: "unknown"}
       driver_identifying_marks: {description: "סימני זיהוי מיוחדים", required: false, default: ""}
-      knows_driver: {description: "קיימת היכרות עם הנילו\"ע", type: choice, options: [unknown, yes, no], default: unknown}
+      knows_driver: {description: "קיימת היכרות עם הנילו\"ע", type: choice, options: ["unknown", "yes", "no"], default: "unknown"}
       offence_date: {description: "תאריך העבירה YYYY-MM-DD", required: false, default: ""}
       offence_day: {description: "יום בשבוע (מחושב מהתאריך אם ריק)", required: false, default: ""}
       offence_time: {description: "שעת העבירה HH:MM", required: false, default: ""}
@@ -24,7 +24,7 @@ on:
       offence_junction_or_house: {description: "צומת רח'/כביש ו/או מס' בית", required: false, default: ""}
       offence_city: {description: "עיר", required: false, default: "ירושלים"}
       offence_description: {description: "תיאור העבירה", required: false, default: ""}
-      willing_to_testify: {description: "מוכן להעיד בבימ\"ש", type: choice, options: [yes, no], default: yes}
+      willing_to_testify: {description: "מוכן להעיד בבימ\"ש", type: choice, options: ["yes", "no"], default: "yes"}
       witness_name: {description: "עד - שם", required: false, default: ""}
       witness_id: {description: "עד - מס' ת.ז.", required: false, default: ""}
       witness_phone: {description: "עד - טלפון", required: false, default: ""}
