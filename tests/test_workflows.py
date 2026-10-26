@@ -54,7 +54,7 @@ def test_choice_options_and_defaults_are_strings():
 def test_filing_boundary_and_secret_scope():
     workflow = yaml.safe_load(Path(".github/workflows/fill-form.yml").read_text())
     job = workflow["jobs"]["fill"]
-    assert job["environment"] == "filing"
+    assert job["environment"] == "production"
     assert job["if"] == "github.ref == 'refs/heads/main'"
     assert "env" not in job  # credentials must not reach checkout, pip or package setup
     steps = job["steps"]
