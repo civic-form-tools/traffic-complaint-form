@@ -54,6 +54,42 @@ One JSON object per complaint. Keys not listed here are ignored.
 | `incidents` | - | Optional non-empty list of incident objects (schema below). When present with 2+ entries, the form becomes a **merged complaint**: one PDF for the vehicle with an incidents table (continuation page allowed). A single-entry list renders exactly like the classic form. |
 | `municipal_case` | `""` | Only inside an incident object: municipal report reference (אסמכתא), printed in the table's ref column. |
 
+### Per-call identity override (payload v2, optional)
+
+Three keys let a caller (for example the MCP server) supply the complainant's
+own details for this run only. They are **all-or-nothing**: include all three
+or none; a partial override fails closed with the code `partial_override`.
+When present they override the `FILING_BUNDLE` identity, recipient and PDF
+password **in memory, for that run only** - they are never written to any
+secret, file, log or output. When absent, the bundle defaults apply (v1
+behaviour, unchanged).
+
+| Key | Format | Notes |
+| --- | --- | --- |
+| `complainant` | object | Exactly `first_name`, `last_name`, `id_number`, `address`, `phone` - same rules as the bundle (9-digit ID with Israeli checksum, no line breaks). |
+| `recipient_email` | string | Where the encrypted PDF is emailed for this run. |
+| `pdf_password` | string | This filing's PDF password: 16+ characters, at most 127 UTF-8 bytes, not equal to the ID number. Chosen by the person filing; never stored. |
+
+```json
+{
+  "vehicle_number": "12-345-67",
+  "...": "case keys as above (all values invented)",
+  "complainant": {
+    "first_name": "דנה",
+    "last_name": "כהן",
+    "id_number": "000000018",
+    "address": "רחוב הדוגמה 2, ירושלים",
+    "phone": "050-1111111"
+  },
+  "recipient_email": "caller@example.com",
+  "pdf_password": "invented-per-call-password"
+}
+```
+
+Validation diagnostics use allowlisted codes only (`partial_override`,
+`complainant.id_number`, `recipient_email`, `pdf_password`, ...) and never
+echo supplied values.
+
 ### Incident object (inside `incidents`)
 
 | Key | Required | Format |

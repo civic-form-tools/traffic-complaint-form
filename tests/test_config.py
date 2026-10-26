@@ -90,3 +90,99 @@ def test_known_field_diagnostic_and_no_values():
         FilingConfig.from_env({"FILING_BUNDLE": json.dumps(bundle)})
     assert error.value.code == "pdf_password"
     assert "private-short" not in str(error.value)
+
+
+# --- Payload v2 per-call override (docs/CASE_DATA.md) ---
+
+from traffic_complaint_form.config import FilingOverride, PayloadError  # noqa: E402
+
+OVERRIDE = {
+    "complainant": {
+        "first_name": "דנה",
+        "last_name": "לוי",
+        "id_number": "000000018",
+        "address": "רחוב המבחן 2",
+        "phone": "050-1111111",
+    },
+    "recipient_email": "caller@example.com",
+    "pdf_password": "invented-per-call-password",
+}
+
+
+def test_override_absent_returns_none():
+    assert FilingOverride.from_payload({"vehicle_number": "12-345-67"}) is None
+    assert FilingOverride.from_payload({}) is None
+
+
+def test_override_valid_roundtrip():
+    override = FilingOverride.from_payload(dict(OVERRIDE))
+    assert override.recipient_email == "caller@example.com"
+    assert override.pdf_password == "invented-per-call-password"  # noqa: S105 - invented fixture
+    assert override.complainant.id_number == "000000018"
+    assert "caller@example.com" not in repr(override)
+
+
+@pytest.mark.parametrize("missing", ["complainant", "recipient_email", "pdf_password"])
+def test_override_is_all_or_nothing(missing):
+    payload = {key: value for key, value in OVERRIDE.items() if key != missing}
+    with pytest.raises(PayloadError) as err:
+        FilingOverride.from_payload(payload)
+    assert err.value.code == "partial_override"
+
+
+@pytest.mark.parametrize(
+    "key,bad,code",
+    [
+        ("id_number", "123456789", "complainant.id_number"),  # checksum fails
+        ("id_number", "123", "complainant.id_number"),
+        ("id_number", "00000001a", "complainant.id_number"),
+        ("first_name", "", "complainant.first_name"),
+        ("phone", "050\n111", "complainant.phone"),
+    ],
+)
+def test_override_complainant_validation(key, bad, code):
+    payload = json.loads(json.dumps(OVERRIDE))
+    payload["complainant"][key] = bad
+    with pytest.raises(PayloadError) as err:
+        FilingOverride.from_payload(payload)
+    assert err.value.code == code
+    if bad:
+        assert bad not in str(err.value)
+
+
+def test_override_complainant_unknown_key_rejected():
+    payload = json.loads(json.dumps(OVERRIDE))
+    payload["complainant"]["nickname"] = "canary"
+    with pytest.raises(PayloadError) as err:
+        FilingOverride.from_payload(payload)
+    assert err.value.code == "complainant"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["short", "x" * 128, "000000018"],  # too short / too many bytes / equals the ID
+)
+def test_override_password_rules(bad):
+    payload = dict(OVERRIDE, pdf_password=bad)
+    with pytest.raises(PayloadError) as err:
+        FilingOverride.from_payload(payload)
+    assert err.value.code == "pdf_password"
+
+
+@pytest.mark.parametrize("bad", ["not-an-email", "@example.com", "a@b\nc", ""])
+def test_override_email_validation(bad):
+    payload = dict(OVERRIDE, recipient_email=bad)
+    with pytest.raises(PayloadError) as err:
+        FilingOverride.from_payload(payload)
+    assert err.value.code == "recipient_email"
+
+
+def test_override_diagnostics_never_echo_values():
+    payload = json.loads(json.dumps(OVERRIDE))
+    payload["complainant"]["id_number"] = "canary-id"
+    payload["pdf_password"] = "canary-password"  # noqa: S105 - invented fixture
+    payload["recipient_email"] = "canary@example.com"
+    with pytest.raises(PayloadError) as err:
+        FilingOverride.from_payload(payload)
+    message = str(err.value)
+    assert "canary" not in message

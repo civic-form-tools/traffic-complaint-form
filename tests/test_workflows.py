@@ -125,3 +125,12 @@ def test_case_key_referenced_only_inside_the_gated_job():
     others = [s for s in workflow["jobs"]["fill"]["steps"] if s is not step]
     for s in others:
         assert "CASE_DATA_PRIVATE_KEY" not in str(s)
+
+
+def test_fill_form_enforces_daily_cap_and_reads_runs():
+    path = Path(".github/workflows/fill-form.yml")
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert doc.get("permissions", {}).get("actions") == "read", "cap step needs actions: read"
+    steps = [step for job in doc["jobs"].values() for step in job.get("steps", [])]
+    cap = [s for s in steps if "daily" in str(s.get("name", "")).lower() and "cap" in str(s.get("name", "")).lower()]
+    assert cap, "fill-form must enforce the daily dispatch cap (docs/MCP.md abuse control)"

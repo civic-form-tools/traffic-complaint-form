@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # the daily-cap step counts this workflow's runs
 
 concurrency:
   group: fill-form
@@ -26,6 +27,20 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Enforce the daily dispatch cap
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DAILY_CAP: ${{ vars.MCP_DAILY_CAP || '10' }}
+        run: |
+          set -euo pipefail
+          today="$(date -u +%F)"
+          count="$(curl -sf --get             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/fill-form.yml/runs"             --data-urlencode "created=>=${today}" --data-urlencode per_page=1             | python3 -c 'import json,sys; print(json.load(sys.stdin)["total_count"])')"
+          echo "fill-form runs today (UTC day): $count (cap $DAILY_CAP, this run included)"
+          if [ "$count" -gt "$DAILY_CAP" ]; then
+            echo "Daily dispatch cap reached - refusing to run (abuse control, see docs/MCP.md)"
+            exit 1
+          fi
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:

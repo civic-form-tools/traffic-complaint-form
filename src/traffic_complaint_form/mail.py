@@ -27,6 +27,14 @@ BODY_REAL = (
     + "הודעה אוטומטית ממערכת traffic-complaint-form."
 )
 
+BODY_REAL_PER_CALL = (
+    "מצורף טופס התלונה הממולא, מוצפן בסיסמה.\n"
+    "הסיסמה היא הסיסמה האישית שבחרת בעת שליחת הטופס.\n\n"
+    + ENCRYPTION_NOTE
+    + "הודעה אוטומטית ממערכת traffic-complaint-form. "
+    "אם לא ביקשת הודעה זו, ניתן לדווח דרך דף האבטחה של המאגר ב-GitHub.\n"
+)
+
 BODY_TEST = (
     "מצורף טופס תלונה לדוגמה, מוצפן בסיסמה.\n"
     "הסיסמה הוגדרה בשדה pdf_password של FILING_BUNDLE.\n\n"
@@ -47,6 +55,7 @@ def send_encrypted_pdf(
     vehicle_number: str,
     offence_date: str,
     test_mode: bool = False,
+    per_call_password: bool = False,
     smtp_factory: Callable[..., smtplib.SMTP] = smtplib.SMTP,
 ) -> None:
     message = EmailMessage()
@@ -57,7 +66,9 @@ def send_encrypted_pdf(
     # which breaks RFC 2047 decoding of a non-ASCII subject.
     prefix = "[TEST] " if test_mode else ""
     message["Subject"] = f"{prefix}Traffic complaint form - vehicle {vehicle_number} - {offence_date}"
-    message.set_content(BODY_TEST if test_mode else BODY_REAL)
+    # Fixed templates only: caller free text never reaches subject or body.
+    body = BODY_TEST if test_mode else (BODY_REAL_PER_CALL if per_call_password else BODY_REAL)
+    message.set_content(body)
     message.add_attachment(
         attachment_path.read_bytes(),
         maintype="application",

@@ -56,6 +56,15 @@ protects only in-transit payloads, never data at rest. `TEST_MODE` is a
 non-secret variable (default true). `ENCRYPT_OUTPUT=false` now fails closed
 in every mode.
 
+## Per-call overrides (payload v2)
+
+A sealed case payload may carry a one-off `complainant`, `recipient_email`
+and `pdf_password` (see docs/CASE_DATA.md). They exist only inside the
+ciphertext and the runner's memory for that single run: they are never
+written to secrets, files, logs or outputs, and FILING_BUNDLE is neither
+read for those fields nor modified. The bundle's `delivery` SMTP settings
+always apply - the sender stays the configured one.
+
 ## Cutover and removal
 
 1. Load the complete FILING_BUNDLE into production directly in GitHub.

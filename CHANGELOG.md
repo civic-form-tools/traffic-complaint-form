@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-10-26
+
+- MCP server (`traffic-complaint-form-mcp`, optional `mcp` extra):
+  `validate_filing` / `seal_filing` / `dispatch_filing` / `filing_status`
+  tools. A caller supplies the complainant identity, delivery email and PDF
+  password per call; they stay in process memory, travel only inside the
+  sealed-box payload and are never persisted, logged or committed.
+- Payload schema v2: optional all-or-nothing per-call override
+  (`complainant` + `recipient_email` + `pdf_password`) applied in memory for
+  one run; FILING_BUNDLE unchanged (SMTP sender and classic defaults).
+  Validation diagnostics use allowlisted codes, never values.
+- fill-form workflow enforces a daily dispatch cap (default 10,
+  `vars.MCP_DAILY_CAP`), counted over the UTC day, fail closed.
+- Email body gains a per-call variant (the recipient's own chosen password,
+  plus an abuse-report pointer); subject/body remain fixed templates with no
+  caller free text.
+- CODEOWNERS now covers `mcp_server.py`; design and threat model in
+  docs/MCP.md.
 
 - `CASE_DATA_PRIVATE_KEY` moved out of repository secrets into the protected
   `production` environment; the keypair was rotated in the process (GitHub
