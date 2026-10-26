@@ -38,3 +38,27 @@ def test_description_multiline_becomes_br(complainant):
 def test_test_mode_adds_watermark(complainant):
     assert "בדיקה - לא לשליחה" in render_form(sample_case(), complainant, test_mode=True)
     assert "בדיקה - לא לשליחה" not in render_form(sample_case(), complainant, test_mode=False)
+
+
+def test_witness_defaults_to_complainant(complainant):
+    case = sample_case()
+    assert case.witness.is_empty
+    html_text = render_form(case, complainant)
+    full_name = f"{complainant.first_name} {complainant.last_name}"
+    witness_line = next(line for line in html_text.splitlines() if "עדים" in line)
+    assert full_name in witness_line
+    assert complainant.id_number in witness_line
+    assert complainant.phone in witness_line
+    assert complainant.address in witness_line
+
+
+def test_explicit_witness_wins(complainant):
+    from traffic_complaint_form.models import Witness
+
+    case = sample_case()
+    explicit = Witness(name="עד ראייה", id_number="000000018", phone="0521111111", address="רחוב העד 1")
+    case2 = case.__class__(**{**case.__dict__, "witness": explicit})
+    witness_line = next(line for line in render_form(case2, complainant).splitlines() if "עדים" in line)
+    assert "עד ראייה" in witness_line
+    assert "000000018" in witness_line
+    assert complainant.id_number not in witness_line
