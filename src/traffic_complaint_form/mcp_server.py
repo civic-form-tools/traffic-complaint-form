@@ -13,6 +13,7 @@ data, arrives via the environment and is never logged.
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -33,6 +34,14 @@ TOKEN_ENV = "TCF_GITHUB_TOKEN"  # noqa: S105 - environment variable name, not a 
 REPO_ENV = "TCF_GITHUB_REPO"
 PUBLIC_KEY_ENV = "TCF_PUBLIC_KEY_B64"
 RUN_DISCOVERY_SKEW_SECONDS = 10
+
+# HTTP exposure (personal review over a tunnel): bearer-protected and
+# synthetic-only - dispatch tools are not registered in this mode at all.
+TRANSPORT_ENV = "TCF_MCP_TRANSPORT"
+BEARER_ENV = "TCF_MCP_BEARER"  # noqa: S105 - environment variable name, not a secret
+HOST_ENV = "TCF_MCP_HOST"
+PORT_ENV = "TCF_MCP_PORT"
+MIN_BEARER_LENGTH = 16
 
 INSTRUCTIONS = (
     "Fill an Israel Police traffic complaint form for the person you serve. "
@@ -249,22 +258,102 @@ def filing_status(run_id: int) -> dict:
     }
 
 
-def build_server() -> Any:
-    """Construct the MCP server; the mcp package is an optional extra."""
+def build_server(*, exposed: bool = False) -> Any:
+    """Construct the MCP server; the mcp package is an optional extra.
+
+    exposed=True is the tunnel/review mode: only validate_filing and
+    seal_filing are registered - the instance cannot dispatch or query runs,
+    so nothing it serves can send, file or touch secrets.
+    """
     try:
         from mcp.server.mcpserver import MCPServer
     except ModuleNotFoundError as exc:  # pragma: no cover - install-dependent
         raise SystemExit("The MCP extra is not installed: pip install 'traffic-complaint-form[mcp]'") from exc
 
-    server = MCPServer("traffic-complaint-form", instructions=INSTRUCTIONS)
-    for tool in (validate_filing, seal_filing, dispatch_filing, filing_status):
+    instructions = INSTRUCTIONS
+    if exposed:
+        instructions += (
+            " This is a review instance: only validate_filing and seal_filing exist here; "
+            "dispatch and status are disabled. Use synthetic (invented) data only."
+        )
+    server = MCPServer("traffic-complaint-form", instructions=instructions)
+    tools = (validate_filing, seal_filing)
+    if not exposed:
+        tools = (*tools, dispatch_filing, filing_status)
+    for tool in tools:
         server.tool()(tool)
     return server
 
 
+class BearerAuth:
+    """ASGI middleware: every HTTP request needs Authorization: Bearer <token>.
+
+    The token is a per-session shared secret the operator generates; it is
+    compared in constant time and never logged. Non-HTTP scopes (lifespan)
+    pass through so the server can start and shut down normally.
+    """
+
+    def __init__(self, app: Any, token: str):
+        self.app = app
+        self._expected = f"Bearer {token}".encode()
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers") or [])
+            supplied = headers.get(b"authorization", b"")
+            if not hmac.compare_digest(supplied, self._expected):
+                body = b'{"error":"unauthorized"}'
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 401,
+                        "headers": [
+                            (b"content-type", b"application/json"),
+                            (b"content-length", str(len(body)).encode()),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
+
+
+def http_settings(environ: dict | None = None) -> tuple[str, int, str]:
+    """Resolve (host, port, bearer token) for HTTP mode; fail closed on a weak setup."""
+    env = os.environ if environ is None else environ
+    token = env.get(BEARER_ENV, "").strip()
+    if len(token) < MIN_BEARER_LENGTH:
+        raise SystemExit(
+            f"HTTP mode requires {BEARER_ENV} with {MIN_BEARER_LENGTH}+ characters - "
+            "refusing to expose an unauthenticated endpoint"
+        )
+    host = env.get(HOST_ENV, "127.0.0.1").strip() or "127.0.0.1"
+    try:
+        port = int(env.get(PORT_ENV, "8000"))
+    except ValueError:
+        raise SystemExit(f"{PORT_ENV} must be an integer") from None
+    if not 1 <= port <= 65535:
+        raise SystemExit(f"{PORT_ENV} must be 1-65535")
+    return host, port, token
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    build_server().run()  # stdio transport
+    transport = os.environ.get(TRANSPORT_ENV, "stdio").strip().lower()
+    if transport == "stdio":
+        build_server().run()  # stdio transport
+        return
+    if transport != "http":
+        raise SystemExit(f"{TRANSPORT_ENV} must be stdio or http")
+    host, port, token = http_settings()
+    logger.warning(
+        "HTTP mode on %s:%s/mcp - review instance: validate/seal only (no dispatch), bearer-protected",
+        host,
+        port,
+    )
+    import uvicorn
+
+    uvicorn.run(BearerAuth(build_server(exposed=True).streamable_http_app(), token), host=host, port=port)
 
 
 if __name__ == "__main__":  # pragma: no cover

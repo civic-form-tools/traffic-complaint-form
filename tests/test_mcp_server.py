@@ -174,3 +174,93 @@ def test_build_server_registers_all_tools():
     server = mcp_server.build_server()
     assert server.name == "traffic-complaint-form"
     assert "never" in server.instructions and "stored" in server.instructions
+
+
+# --- HTTP exposure: bearer auth + synthetic-only toolset ---
+
+import asyncio  # noqa: E402
+
+
+def _call_asgi(app, headers):
+    """Drive one HTTP request through an ASGI app and capture the response."""
+    sent = []
+
+    async def run():
+        async def receive():
+            return {"type": "http.request", "body": b""}
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {"type": "http", "method": "POST", "path": "/mcp", "headers": headers}
+        await app(scope, receive, send)
+
+    asyncio.run(run())
+    return sent
+
+
+async def _noop_app(scope, receive, send):
+    await send({"type": "http.response.start", "status": 200, "headers": []})
+    await send({"type": "http.response.body", "body": b"ok"})
+
+
+def test_bearer_auth_rejects_missing_and_wrong_token():
+    app = mcp_server.BearerAuth(_noop_app, "invented-session-token-123")
+    for headers in (
+        [],
+        [(b"authorization", b"Bearer wrong-token")],
+        [(b"authorization", b"bearer invented-session-token-123")],
+    ):
+        sent = _call_asgi(app, headers)
+        assert sent[0]["status"] == 401
+        assert b"unauthorized" in sent[1]["body"]
+
+
+def test_bearer_auth_accepts_exact_token_and_passes_lifespan():
+    app = mcp_server.BearerAuth(_noop_app, "invented-session-token-123")
+    sent = _call_asgi(app, [(b"authorization", b"Bearer invented-session-token-123")])
+    assert sent[0]["status"] == 200
+
+    async def lifespan():
+        seen = []
+
+        async def receive():
+            return {"type": "lifespan.startup"}
+
+        async def send(message):
+            seen.append(message)
+
+        await app({"type": "lifespan"}, receive, send)
+        return seen
+
+    assert len(asyncio.run(lifespan())) == 2  # lifespan passes through to the app untouched
+
+
+def test_exposed_server_registers_only_validate_and_seal():
+    exposed = mcp_server.build_server(exposed=True)
+    names = {t.name for t in asyncio.run(exposed.list_tools())}
+    assert names == {"validate_filing", "seal_filing"}
+    assert "synthetic" in exposed.instructions.lower()
+    full = mcp_server.build_server()
+    assert {t.name for t in asyncio.run(full.list_tools())} == {
+        "validate_filing",
+        "seal_filing",
+        "dispatch_filing",
+        "filing_status",
+    }
+
+
+def test_http_settings_fail_closed():
+    import pytest as _pytest
+
+    with _pytest.raises(SystemExit):
+        mcp_server.http_settings({})  # no token at all
+    with _pytest.raises(SystemExit):
+        mcp_server.http_settings({mcp_server.BEARER_ENV: "short"})
+    with _pytest.raises(SystemExit):
+        mcp_server.http_settings({mcp_server.BEARER_ENV: "x" * 20, mcp_server.PORT_ENV: "not-a-port"})
+    with _pytest.raises(SystemExit):
+        mcp_server.http_settings({mcp_server.BEARER_ENV: "x" * 20, mcp_server.PORT_ENV: "99999"})
+    host, port, token = mcp_server.http_settings({mcp_server.BEARER_ENV: "invented-session-token-123"})
+    assert (host, port) == ("127.0.0.1", 8000)
+    assert token == "invented-session-token-123"  # noqa: S105 - invented fixture

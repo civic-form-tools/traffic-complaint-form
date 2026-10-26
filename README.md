@@ -90,6 +90,20 @@ traffic-complaint-form-mcp    # stdio server: validate_filing / seal_filing / di
 Design and threat model: [docs/MCP.md](docs/MCP.md). Payload schema:
 [docs/CASE_DATA.md](docs/CASE_DATA.md).
 
+**Remote review over a tunnel (e.g. a claude.ai connector):** HTTP mode
+exposes a **synthetic-only** instance - only `validate_filing` and
+`seal_filing` are registered (no dispatch, no status, nothing can be sent or
+filed) - behind a per-session bearer token:
+
+```bash
+export TCF_MCP_BEARER="$(openssl rand -hex 24)"   # per-session shared secret
+TCF_MCP_TRANSPORT=http traffic-complaint-form-mcp  # 127.0.0.1:8000, endpoint path /mcp
+cloudflared tunnel --url http://127.0.0.1:8000     # free quick tunnel
+```
+
+HTTP mode refuses to start without a 16+ character bearer token. Stop the
+tunnel and server when the review ends; the token is disposable.
+
 ## Development
 
 ```bash

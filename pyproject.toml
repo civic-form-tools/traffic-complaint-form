@@ -24,10 +24,12 @@ dev = [
     "pyyaml>=6",
     "mcp>=2.3",
     "httpx>=0.28",
+    "uvicorn>=0.30",
 ]
 mcp = [
     "mcp>=2.3",
     "httpx>=0.28",
+    "uvicorn>=0.30",
 ]
 
 [project.scripts]
