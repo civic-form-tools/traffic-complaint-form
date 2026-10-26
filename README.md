@@ -48,6 +48,8 @@ Repository/environment variables:
 | `TEST_MODE` | `true` | Watermark the PDF (בדיקה - לא לשליחה) and tag the subject `[בדיקה]`. |
 | `ENCRYPT_OUTPUT` | `true` | Encrypt the PDF. May be `false` **only** while `TEST_MODE=true` (dummy data); the CLI refuses otherwise. |
 
+Phase 2 (optional): loading the environment secret `SMIME_PUBLIC_CERT` (the recipient's PUBLIC S/MIME certificate, PEM) makes the runner encrypt the entire email to that certificate before SMTP, on top of the password-encrypted PDF. See [docs/SECRETS.md](docs/SECRETS.md#smime-public-certificate-phase-2).
+
 ## Running a test pass
 
 1. Load the dummy secrets (invented values - see docs/SECRETS.md).

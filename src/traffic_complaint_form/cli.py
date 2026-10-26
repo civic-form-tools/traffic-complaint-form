@@ -94,6 +94,15 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Missing required secret environment variables (names only): %s", ", ".join(missing))
         return EXIT_MISSING_CONFIG
 
+    smime_cert_pem = os.environ.get("SMIME_PUBLIC_CERT", "").strip() or None
+    if smime_cert_pem is not None:
+        from .smime import SMIMEError, validate_cert_pem
+
+        try:
+            validate_cert_pem(smime_cert_pem)
+        except SMIMEError as exc:
+            logger.error("Invalid SMIME_PUBLIC_CERT: %s", exc)
+            return EXIT_MISSING_CONFIG
     complainant, complainant_missing = Complainant.from_env()
     if complainant is None:
         logger.error("Missing complainant secrets: %s", ", ".join(complainant_missing))
@@ -173,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
             vehicle_number=case.vehicle.number,
             offence_date=case.offence.date.strftime("%d/%m/%Y"),
             test_mode=test_mode,
+            smime_cert_pem=smime_cert_pem,
         )
     except Exception:
         logger.exception("Email delivery failed; encrypted file kept at %s", outfile)

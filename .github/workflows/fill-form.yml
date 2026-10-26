@@ -58,6 +58,7 @@ jobs:
       SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
       SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
       CASE_DATA_PRIVATE_KEY: ${{ secrets.CASE_DATA_PRIVATE_KEY }}
+      SMIME_PUBLIC_CERT: ${{ secrets.SMIME_PUBLIC_CERT }}
     steps:
       - name: Validate required secrets (names only, fail fast)
         run: |

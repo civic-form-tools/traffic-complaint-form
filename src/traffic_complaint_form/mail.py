@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import smtplib
+import tempfile
 from collections.abc import Callable
 from email.message import EmailMessage
 from pathlib import Path
@@ -32,6 +33,7 @@ def send_encrypted_pdf(
     vehicle_number: str,
     offence_date: str,
     test_mode: bool = False,
+    smime_cert_pem: str | None = None,
     smtp_factory: Callable[..., smtplib.SMTP] = smtplib.SMTP,
 ) -> None:
     message = EmailMessage()
@@ -46,12 +48,22 @@ def send_encrypted_pdf(
         subtype="pdf",
         filename=attachment_path.name,
     )
+    if smime_cert_pem:
+        from .smime import encrypt_message
+
+        with tempfile.TemporaryDirectory(prefix="tcf-smime-") as tmp:
+            raw = encrypt_message(message, cert_pem=smime_cert_pem, tmpdir=Path(tmp))
+    else:
+        raw = None
     with smtp_factory(SMTP_HOST, SMTP_PORT, timeout=60) as server:
         server.ehlo()
         server.starttls()
         server.ehlo()
         server.login(smtp_username, smtp_password)
-        refused = server.send_message(message)
+        if raw is not None:
+            refused = server.sendmail(smtp_username, [recipient], raw)
+        else:
+            refused = server.send_message(message)
     if refused:
         raise RuntimeError(f"SMTP server refused {len(refused)} recipient(s)")
     logger.info("SMTP accepted the message for delivery")

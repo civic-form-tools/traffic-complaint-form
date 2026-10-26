@@ -138,3 +138,13 @@ def test_is_test_mode_default_true():
 def test_required_secret_names_dry_run():
     assert "SMTP_USERNAME" not in required_secret_names(dry_run=True)
     assert "SMTP_USERNAME" in required_secret_names(dry_run=False)
+
+
+def test_bad_smime_cert_fails_fast_name_only(monkeypatch, tmp_path, caplog):
+    set_env(monkeypatch)
+    monkeypatch.setenv("SMIME_PUBLIC_CERT", "not-a-real-cert")
+    with caplog.at_level(logging.INFO):
+        code = main(["--sample", "--out-dir", str(tmp_path), "--dry-run"])
+    assert code == 2
+    assert "SMIME_PUBLIC_CERT" in caplog.text
+    assert "not-a-real-cert" not in caplog.text
