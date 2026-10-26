@@ -111,4 +111,5 @@ def test_hebrew_abbreviations_use_gershayim_not_ascii_quotes(complainant):
     assert "הנילו\u05b4ע" in rendered
     assert "בימ\u05b4ש" in rendered
     assert "&quot;" not in rendered
-    assert "מס\u05b3 דוח" in rendered  # geresh in the ref column header
+    assert "דיווח לעירייה" in rendered  # refs are municipal (106) reports, not police tickets
+    assert "מס\u05b3 דוח" not in rendered

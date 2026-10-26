@@ -86,7 +86,7 @@ def _incidents_table_html(case: CaseData) -> str:
     return (
         '<table class="incidents"><thead><tr>'
         "<th>#</th><th>תאריך</th><th>יום</th><th>שעה</th><th>מיקום</th>"
-        "<th>תיאור העבירה</th><th>אסמכתא (מסֳ דוח)</th>"
+        "<th>תיאור העבירה</th><th>אסמכתא (דיווח לעירייה)</th>"
         "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
     )
 
