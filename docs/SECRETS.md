@@ -41,7 +41,8 @@ is a JSON integer, not a quoted string (normally 587 for STARTTLS).
 The bundle stays in process memory; it is not split into GITHUB_ENV,
 outputs, command arguments or temporary plaintext configuration files.
 Runtime exception details are withheld because a library can echo secrets.
-Test mode only watermarks the form; it is not proof that identity is fake.
+Sample workflow runs always force a test watermark without changing the
+production variable. Test mode only watermarks the form; it is not proof that identity is fake.
 PDF encryption is therefore mandatory in every mode, without an ID fallback.
 
 `CASE_DATA_PRIVATE_KEY` remains a separate secret for encrypted incident

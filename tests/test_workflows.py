@@ -66,3 +66,9 @@ def test_filing_boundary_and_secret_scope():
     for name in ["COMPLAINANT_ID", "PDF_PASSWORD", "SMTP_APP_PASSWORD", "RECIPIENT_EMAIL"]:
         assert "secrets." + name not in text
     assert "'${{ inputs.encrypted_case }}'" not in text
+
+
+def test_sample_verification_always_watermarked():
+    workflow = yaml.safe_load(Path(".github/workflows/fill-form.yml").read_text())
+    step = next(s for s in workflow["jobs"]["fill"]["steps"] if s.get("name") == "Fill, verify and send")
+    assert step["env"]["TEST_MODE"] == "${{ inputs.encrypted_case == '' && 'true' || vars.TEST_MODE }}"

@@ -61,7 +61,7 @@ jobs:
         env:
           FILING_BUNDLE: ${{ secrets.FILING_BUNDLE }}
           CASE_DATA_PRIVATE_KEY: ${{ secrets.CASE_DATA_PRIVATE_KEY }}
-          TEST_MODE: ${{ vars.TEST_MODE }}
+          TEST_MODE: ${{ inputs.encrypted_case == '' && 'true' || vars.TEST_MODE }}
           ENCRYPT_OUTPUT: ${{ vars.ENCRYPT_OUTPUT }}
           DRY: ${{ inputs.dry_run && '1' || '' }}
 
