@@ -34,7 +34,7 @@ def test_send_flow_uses_tls_and_login(tmp_path):
     (message,), _ = server.send_message.call_args
     assert message["To"] == "dest@example.com"
     assert "12-345-67" in message["Subject"]
-    assert "[בדיקה]" not in message["Subject"]
+    assert "[TEST]" not in message["Subject"]
     attachments = list(message.iter_attachments())
     assert len(attachments) == 1
     assert attachments[0].get_filename() == "form.pdf"
@@ -58,7 +58,7 @@ def test_test_mode_prefixes_subject(tmp_path):
         smtp_factory=factory,
     )
     (message,), _ = server.send_message.call_args
-    assert message["Subject"].startswith("[בדיקה] ")
+    assert message["Subject"].startswith("[TEST] ")
 
 
 def test_refused_recipient_raises(tmp_path):
@@ -102,3 +102,31 @@ def test_no_credentials_in_logs(tmp_path, caplog):
         )
     assert "super-secret-pw" not in caplog.text
     assert "dest@example.com" not in caplog.text
+
+
+@pytest.mark.parametrize("test_mode", [False, True])
+def test_subject_is_ascii_only(tmp_path, test_mode):
+    """A gateway-prepended warning must not be able to break subject decoding."""
+    attachment = tmp_path / "form.pdf"
+    attachment.write_bytes(b"%PDF-1.7 fake")
+    factory, server = make_smtp()
+    send_encrypted_pdf(
+        smtp_host="smtp.example.com",
+        smtp_port=587,
+        smtp_username="sender@example.com",
+        smtp_password="app-password",
+        from_address="sender@example.com",
+        recipient="dest@example.com",
+        attachment_path=attachment,
+        vehicle_number="12-345-67",
+        offence_date="15/01/2026",
+        test_mode=test_mode,
+        smtp_factory=factory,
+    )
+    (message,), _ = server.send_message.call_args
+    subject = str(message["Subject"])
+    assert subject.isascii(), subject
+    assert "12-345-67" in subject
+    body = message.get_body(preferencelist=("plain",)).get_content()
+    assert "unscannable" in body  # sets expectations about the gateway warning
+    assert "מוצפן" in body
