@@ -48,6 +48,8 @@ Repository/environment variables:
 | `TEST_MODE` | `true` | Watermark the PDF (בדיקה - לא לשליחה) and tag the subject `[בדיקה]`. |
 | `ENCRYPT_OUTPUT` | `true` | Encrypt the PDF. May be `false` **only** while `TEST_MODE=true` (dummy data); the CLI refuses otherwise. |
 
+PDF password: the dedicated `PDF_PASSWORD` secret is the primary for real data (the user loads a hard-to-guess value himself). Only while `TEST_MODE=true`, an unset `PDF_PASSWORD` falls back to the complainant ID number - low-entropy (9 digits, offline-brute-forceable), an accepted tradeoff for test data only. Outside test mode the run refuses to encrypt without `PDF_PASSWORD`. The value never appears in logs.
+
 ## Running a test pass
 
 1. Load the dummy secrets (invented values - see docs/SECRETS.md).
