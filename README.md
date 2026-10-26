@@ -70,6 +70,26 @@ The workflow decrypts it in memory; logs and the output filename carry no
 plates or locations. The exact payload schema, defaults and caller steps:
 [docs/CASE_DATA.md](docs/CASE_DATA.md).
 
+## MCP server (per-call details, never stored)
+
+An MCP (Model Context Protocol) server lets an AI agent file a complaint for
+the person it serves with **that person's own details supplied per call** -
+ID number, delivery email and PDF password - without this system storing any
+of them: no persistence, no logs, memory only, never committed. The details
+ride inside the same sealed box as the case data (payload schema v2), and the
+workflow applies them in memory for that run only. Sending always uses the
+configured FILING_BUNDLE sender, and every run still waits on the production
+gate's human approval. Nothing is submitted to the police.
+
+```bash
+pip install -e '.[mcp]'
+export TCF_GITHUB_TOKEN=...   # fine-grained PAT, Actions read/write on this repo only
+traffic-complaint-form-mcp    # stdio server: validate_filing / seal_filing / dispatch_filing / filing_status
+```
+
+Design and threat model: [docs/MCP.md](docs/MCP.md). Payload schema:
+[docs/CASE_DATA.md](docs/CASE_DATA.md).
+
 ## Development
 
 ```bash

@@ -7,3 +7,4 @@
 /src/traffic_complaint_form/config.py @reihl
 /src/traffic_complaint_form/crypto.py @reihl
 /src/traffic_complaint_form/mail.py @reihl
+/src/traffic_complaint_form/mcp_server.py @reihl

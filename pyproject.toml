@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "traffic-complaint-form"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fill a police traffic complaint form from GitHub Actions; identity stays in Secrets, output PDF is AES-256 encrypted and emailed"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,11 +22,18 @@ dev = [
     "ruff>=0.6",
     "pypdf>=4",
     "pyyaml>=6",
+    "mcp>=2.3",
+    "httpx>=0.28",
+]
+mcp = [
+    "mcp>=2.3",
+    "httpx>=0.28",
 ]
 
 [project.scripts]
 traffic-complaint-form = "traffic_complaint_form.cli:main"
 traffic-complaint-form-encrypt-case = "traffic_complaint_form.crypto:encrypt_case_main"
+traffic-complaint-form-mcp = "traffic_complaint_form.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
