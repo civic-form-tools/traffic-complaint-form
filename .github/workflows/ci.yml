@@ -1,11 +1,12 @@
 name: CI
 
+# Public repo: Actions minutes are free and unlimited here, so CI runs on
+# every push/PR. This also keeps required status checks reporting on
+# docs/workflow-only PRs (a paths filter would deadlock branch protection).
 on:
   push:
     branches: [main]
-    paths: ["src/**", "tests/**", "pyproject.toml", ".github/workflows/ci.yml"]
   pull_request:
-    paths: ["src/**", "tests/**", "pyproject.toml", ".github/workflows/ci.yml"]
   workflow_dispatch:
 
 permissions:
