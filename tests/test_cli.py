@@ -131,3 +131,12 @@ def test_encrypted_case_roundtrip_and_log_privacy(monkeypatch, tmp_path, caplog)
 def test_is_test_mode():
     assert is_test_mode({}) is True
     assert is_test_mode({"TEST_MODE": "false"}) is False
+
+
+def test_validation_only_never_renders_or_sends(monkeypatch, caplog):
+    set_env(monkeypatch)
+    monkeypatch.setattr(cli, "render_form", lambda *a, **k: pytest.fail("must not render"))
+    monkeypatch.setattr(cli, "send_encrypted_pdf", lambda **k: pytest.fail("must not send"))
+    with caplog.at_level(logging.INFO):
+        assert main(["--validate-config"]) == 0
+    assert "validation OK" in caplog.text

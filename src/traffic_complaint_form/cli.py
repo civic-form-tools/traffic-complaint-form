@@ -43,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--sample", action="store_true", help="Use invented sample case data")
     parser.add_argument("--out-dir", type=Path, default=Path("out"), help="Directory for the encrypted PDF")
     parser.add_argument("--dry-run", action="store_true", help="Build, encrypt and verify, but skip the email")
+    parser.add_argument("--validate-config", action="store_true", help="Validate bundle only; no PDF or email")
     return parser
 
 
@@ -70,9 +71,12 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_UNSAFE
     try:
         config = FilingConfig.from_env(os.environ)
-    except BundleError:
-        logger.error("FILING_BUNDLE is missing or invalid; see docs/SECRETS.md (values withheld)")
+    except BundleError as exc:
+        logger.error("%s", exc)
         return EXIT_MISSING_CONFIG
+    if args.validate_config:
+        logger.info("FILING_BUNDLE validation OK (values withheld); no PDF or email")
+        return 0
     complainant = config.complainant
     pdf_password = config.pdf_password
 
