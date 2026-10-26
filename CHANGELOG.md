@@ -29,3 +29,11 @@ Initial release.
 - CI: ruff + pytest (Python 3.10-3.13) with an 80% coverage floor and a
   per-test report, pip-audit, CodeQL, dependency review; Dependabot for pip
   and actions; all actions pinned to SHAs.
+
+## Unreleased - atomic filing bundle
+
+- Replace split identity/password/delivery configuration with mandatory, strict
+  FILING_BUNDLE JSON; no partial or legacy fallback.
+- Require PDF encryption in all modes and suppress sensitive exception details.
+- Scope credentials to the application step; reject non-main filing dispatches.
+- Document migration, old-secret removal and remaining admin/code-author risks.

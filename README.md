@@ -1,7 +1,7 @@
 # traffic-complaint-form
 
-[![CI](https://github.com/reihlinstinct/traffic-complaint-form/actions/workflows/ci.yml/badge.svg)](https://github.com/reihlinstinct/traffic-complaint-form/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/reihlinstinct/traffic-complaint-form/actions/workflows/codeql.yml/badge.svg)](https://github.com/reihlinstinct/traffic-complaint-form/actions/workflows/codeql.yml)
+[![CI](https://github.com/civic-form-tools/traffic-complaint-form/actions/workflows/ci.yml/badge.svg)](https://github.com/civic-form-tools/traffic-complaint-form/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/civic-form-tools/traffic-complaint-form/actions/workflows/codeql.yml/badge.svg)](https://github.com/civic-form-tools/traffic-complaint-form/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.10-3.13](https://img.shields.io/badge/python-3.10--3.13-blue.svg)](pyproject.toml)
 
@@ -12,7 +12,7 @@ filled one-page PDF by email.
 **Privacy model:** this repository is public and contains **no personal data**.
 The complainant identity (name, ID number, address, phone), the output
 encryption secret, the recipient email and the SMTP credentials live only in
-GitHub Secrets. Real case data (plates, locations, incident details) never
+one atomic GitHub Secret. Real case data (plates, locations, incident details) never
 travels in plaintext either: public workflow inputs and logs would expose it,
 so it arrives as a **sealed-box encrypted payload** that only the workflow's
 private key (also a Secret) can open.
@@ -23,40 +23,37 @@ private key (also a Secret) can open.
 flowchart LR
     A["workflow_dispatch inputs<br>sample / non-sensitive case JSON<br>or sealed-box encrypted payload"] --> C["fill + render<br>WeasyPrint (RTL Hebrew)"]
     K["repo public key<br>form/keys/case-data-public.key"] -. callers encrypt .-> A
-    S[("GitHub Secrets (environment: filing)<br>complainant identity, PDF password,<br>recipient email, SMTP settings + app password,<br>case-data private key")] --> C
-    C --> D["pikepdf AES-256 encrypt<br>(switchable: ENCRYPT_OUTPUT)"]
+    S[("GitHub Secrets (environment: production)<br>complainant identity, PDF password,<br>recipient email, SMTP settings + app password,<br>case-data private key")] --> C
+    C --> D["pikepdf AES-256 encrypt<br>(mandatory in every mode)"]
     D --> V["verify: password required,<br>exactly 1 page"]
     V --> M["SMTP (STARTTLS, app password)<br>host/port/from all secret-driven"]
     M --> E["recipient inbox"]
 ```
 
-Every run of `Fill and send complaint form` is gated by the **filing**
+Every run of `Fill and send complaint form` is gated by the **production**
 environment, whose required reviewer must approve before any secret is
 exposed to the job.
 
 ## Configuration
 
-Secrets (see [docs/SECRETS.md](docs/SECRETS.md) for the full specification):
-`COMPLAINANT_FIRST_NAME`, `COMPLAINANT_LAST_NAME`, `COMPLAINANT_ID`,
-`COMPLAINANT_ADDRESS`, `COMPLAINANT_PHONE`, `PDF_PASSWORD`, `RECIPIENT_EMAIL`,
-`SMTP_HOST`, `SMTP_PORT` (optional, default 587), `SMTP_USERNAME`, `SMTP_APP_PASSWORD`, `SMTP_FROM`, `CASE_DATA_PRIVATE_KEY`.
+Use one **FILING_BUNDLE** JSON secret in the protected **production** environment,
+containing the full identity, strong PDF password, recipient and SMTP settings.
+The exact placeholder template and cutover/removal checklist are in
+[docs/SECRETS.md](docs/SECRETS.md). CASE_DATA_PRIVATE_KEY remains separate.
+No individual identity/password/delivery secret is read by the current workflow.
+Missing or partial bundles fail closed, including dry runs and sample runs.
 
-Repository/environment variables:
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `TEST_MODE` | `true` | Watermark the PDF (בדיקה - לא לשליחה) and tag the subject `[בדיקה]`. |
-| `ENCRYPT_OUTPUT` | `true` | Encrypt the PDF. May be `false` **only** while `TEST_MODE=true` (dummy data); the CLI refuses otherwise. |
-
-PDF password: the dedicated `PDF_PASSWORD` secret is the primary for real data (the user loads a hard-to-guess value himself). Only while `TEST_MODE=true`, an unset `PDF_PASSWORD` falls back to the complainant ID number - low-entropy (9 digits, offline-brute-forceable), an accepted tradeoff for test data only. Outside test mode the run refuses to encrypt without `PDF_PASSWORD`. The value never appears in logs.
+TEST_MODE (default true) adds a watermark and a test subject. It does not
+prove identity is invented. PDF encryption is mandatory in every mode;
+ENCRYPT_OUTPUT=false is rejected and there is no ID-password fallback.
 
 ## Running a test pass
 
-1. Load the dummy secrets (invented values - see docs/SECRETS.md).
-2. Actions -> **Fill and send complaint form** -> enable `sample_data`,
-   approve the environment review.
-3. An encrypted, watermarked PDF arrives by email. To skip encryption during
-   the dummy phase, set `ENCRYPT_OUTPUT=false`.
+Load the complete bundle directly in GitHub, dispatch **Fill and send
+complaint form** on main using sample data, and approve the production gate.
+Use dry_run to build and verify without email. CI uses invented fixtures only.
+Read the [threat model](docs/SECRETS.md#threat-model-and-trust-boundary):
+a bundle prevents partial secret replacement, not malicious approved code.
 
 ## Filing a real complaint
 

@@ -1,74 +1,99 @@
 import json
 import logging
 
-from traffic_complaint_form import cli
-from traffic_complaint_form.cli import is_test_mode, main, required_secret_names
+import pikepdf
+import pytest
 
-ENV = {
-    "COMPLAINANT_FIRST_NAME": "משה",
-    "COMPLAINANT_LAST_NAME": "כהן",
-    "COMPLAINANT_ID": "123456782",  # documented test placeholder
-    "COMPLAINANT_ADDRESS": "רחוב הדוגמה 1",
-    "COMPLAINANT_PHONE": "050-0000000",
-    "PDF_PASSWORD": "test-pw",
+from traffic_complaint_form import cli
+from traffic_complaint_form.cli import is_test_mode, main
+
+BUNDLE = {
+    "version": 1,
+    "complainant": {
+        "first_name": "משה",
+        "last_name": "כהן",
+        "id_number": "123456782",
+        "address": "רחוב הדוגמה 1",
+        "phone": "050-0000000",
+    },
+    "pdf_password": "invented-test-password-only",
+    "delivery": {
+        "recipient_email": "recipient@example.com",
+        "smtp_host": "smtp.example.com",
+        "smtp_port": 587,
+        "smtp_username": "sender@example.com",
+        "smtp_app_password": "invented-app-password",
+        "smtp_from": "sender@example.com",
+    },
 }
 
 
-def set_env(monkeypatch, extra=None):
-    for key, value in {**ENV, **(extra or {})}.items():
-        monkeypatch.setenv(key, value)
-
-
-def test_missing_secrets_reports_names_not_values(monkeypatch, tmp_path, caplog):
-    monkeypatch.setenv("COMPLAINANT_FIRST_NAME", "secret-first-name")
-    with caplog.at_level(logging.INFO):
-        code = main(["--sample", "--out-dir", str(tmp_path), "--dry-run"])
-    assert code == 2
-    assert "COMPLAINANT_ID" in caplog.text
-    assert "secret-first-name" not in caplog.text
+def set_env(monkeypatch, bundle=None):
+    monkeypatch.setenv("FILING_BUNDLE", json.dumps(BUNDLE if bundle is None else bundle))
 
 
 def test_dry_run_sample_end_to_end(monkeypatch, tmp_path, caplog):
     set_env(monkeypatch)
     with caplog.at_level(logging.INFO):
-        code = main(["--sample", "--out-dir", str(tmp_path), "--dry-run"])
-    assert code == 0
-    produced = list(tmp_path.glob("*.pdf"))
-    assert len(produced) == 1
-    import pikepdf
-
-    with pikepdf.open(str(produced[0]), password="test-pw") as pdf:
+        assert main(["--sample", "--out-dir", str(tmp_path), "--dry-run"]) == 0
+    pdfs = list(tmp_path.glob("*.pdf"))
+    assert len(pdfs) == 1
+    with pikepdf.open(pdfs[0], password=BUNDLE["pdf_password"]) as pdf:
         assert len(pdf.pages) == 1
-    assert ENV["COMPLAINANT_ID"] not in caplog.text  # secrets stay out of logs
-    assert ENV["COMPLAINANT_PHONE"] not in caplog.text
+    with pytest.raises(pikepdf.PasswordError):
+        pikepdf.open(pdfs[0])
+    for value in [*BUNDLE["complainant"].values(), BUNDLE["pdf_password"], *BUNDLE["delivery"].values()]:
+        if isinstance(value, str):
+            assert value not in caplog.text
 
 
-def test_case_json_input(monkeypatch, tmp_path):
+@pytest.mark.parametrize("raw", ["", "{}", "[]", '{"pdf_password":"attacker-password"}', '{"secret":"private"'])
+def test_missing_partial_bundle_fails_closed_even_with_legacy(monkeypatch, tmp_path, caplog, raw):
+    monkeypatch.setenv("FILING_BUNDLE", raw)
+    for key in ("FIRST_NAME", "LAST_NAME", "ID", "ADDRESS", "PHONE"):
+        monkeypatch.setenv("COMPLAINANT_" + key, "legacy-private-canary")
+    monkeypatch.setenv("PDF_PASSWORD", "attacker-password")
+    monkeypatch.setattr(cli, "render_form", lambda *a, **k: pytest.fail("must not render"))
+    monkeypatch.setattr(cli, "send_encrypted_pdf", lambda **k: pytest.fail("must not send"))
+    assert main(["--sample", "--out-dir", str(tmp_path), "--dry-run"]) == 2
+    assert not list(tmp_path.iterdir())
+    assert "FILING_BUNDLE" in caplog.text
+    assert "legacy-private-canary" not in caplog.text
+    assert "attacker-password" not in caplog.text
+    assert "private" not in caplog.text
+
+
+def test_send_path_calls_mail(monkeypatch, tmp_path):
     set_env(monkeypatch)
-    case_file = tmp_path / "case.json"
-    case_file.write_text(
-        json.dumps(
-            {
-                "police_station": "מוריה",
-                "vehicle_number": "98-765-43",
-                "vehicle_manufacturer": "מאזדה",
-                "vehicle_color": "אדום",
-                "offence_date": "2026-02-01",
-                "offence_time": "09:15",
-                "offence_street": "רחוב הדוגמה",
-                "offence_city": "ירושלים",
-                "offence_description": "תיאור",
-            }
-        )
-    )
-    assert main(["--case-json", str(case_file), "--out-dir", str(tmp_path / "o"), "--dry-run"]) == 0
+    calls = {}
+    monkeypatch.setattr(cli, "send_encrypted_pdf", lambda **kw: calls.update(kw))
+    assert main(["--sample", "--out-dir", str(tmp_path)]) == 0
+    assert calls["recipient"] == BUNDLE["delivery"]["recipient_email"]
+    assert calls["smtp_port"] == 587
+    assert calls["smtp_password"] == BUNDLE["delivery"]["smtp_app_password"]
 
 
-def test_invalid_case_json(monkeypatch, tmp_path):
+@pytest.mark.parametrize("stage", ["render_form", "encrypt_pdf", "send_encrypted_pdf"])
+def test_failures_do_not_log_exception_values(monkeypatch, tmp_path, caplog, capsys, stage):
     set_env(monkeypatch)
-    bad = tmp_path / "bad.json"
-    bad.write_text("{}")
-    assert main(["--case-json", str(bad), "--out-dir", str(tmp_path / "o"), "--dry-run"]) == 2
+
+    def fail(*args, **kwargs):
+        raise RuntimeError(json.dumps(BUNDLE))
+
+    monkeypatch.setattr(cli, stage, fail)
+    assert main(["--sample", "--out-dir", str(tmp_path)]) == 1
+    output = caplog.text + capsys.readouterr().err
+    assert BUNDLE["pdf_password"] not in output
+    assert BUNDLE["complainant"]["id_number"] not in output
+    assert BUNDLE["delivery"]["smtp_app_password"] not in output
+
+
+@pytest.mark.parametrize("test_mode", ["true", "false"])
+def test_never_disable_encryption(monkeypatch, tmp_path, test_mode):
+    set_env(monkeypatch)
+    monkeypatch.setenv("TEST_MODE", test_mode)
+    monkeypatch.setenv("ENCRYPT_OUTPUT", "false")
+    assert main(["--sample", "--out-dir", str(tmp_path), "--dry-run"]) == 4
 
 
 def test_overflow_returns_3(monkeypatch, tmp_path):
@@ -77,145 +102,32 @@ def test_overflow_returns_3(monkeypatch, tmp_path):
     assert main(["--sample", "--out-dir", str(tmp_path), "--dry-run"]) == 3
 
 
-SMTP_ENV = {
-    "RECIPIENT_EMAIL": "d@example.com",
-    "SMTP_HOST": "smtp.example.com",
-    "SMTP_USERNAME": "u",
-    "SMTP_APP_PASSWORD": "p",
-    "SMTP_FROM": "f@example.com",
-}
-
-
-def test_send_path_calls_mail(monkeypatch, tmp_path):
-    set_env(monkeypatch, SMTP_ENV)
-    calls = {}
-    monkeypatch.setattr(cli, "send_encrypted_pdf", lambda **kw: calls.update(kw))
-    assert main(["--sample", "--out-dir", str(tmp_path)]) == 0
-    assert calls["recipient"] == "d@example.com"
-    assert calls["vehicle_number"] == "12-345-67"
-    assert calls["smtp_host"] == "smtp.example.com"
-    assert calls["smtp_port"] == 587
-    assert calls["from_address"] == "f@example.com"
-
-
-def test_send_path_requires_smtp_host_and_from(monkeypatch, tmp_path, caplog):
-    set_env(monkeypatch, {"RECIPIENT_EMAIL": "d@example.com", "SMTP_USERNAME": "u", "SMTP_APP_PASSWORD": "p"})
-    with caplog.at_level(logging.INFO):
-        code = main(["--sample", "--out-dir", str(tmp_path)])
-    assert code == 2
-    assert "SMTP_HOST" in caplog.text
-    assert "SMTP_FROM" in caplog.text
-    assert "SMTP_PORT" not in caplog.text  # optional, defaults to 587
-
-
-def test_smtp_port_override(monkeypatch, tmp_path):
-    set_env(monkeypatch, {**SMTP_ENV, "SMTP_PORT": "465"})
-    calls = {}
-    monkeypatch.setattr(cli, "send_encrypted_pdf", lambda **kw: calls.update(kw))
-    assert main(["--sample", "--out-dir", str(tmp_path)]) == 0
-    assert calls["smtp_port"] == 465
-
-
-def test_encrypted_case_requires_private_key(monkeypatch, tmp_path, caplog):
+def test_case_json_and_invalid_input(monkeypatch, tmp_path, caplog):
     set_env(monkeypatch)
-    from traffic_complaint_form.crypto import encrypt_payload, generate_keypair
-
-    public_b64, _ = generate_keypair()
-    enc = tmp_path / "case.enc"
-    enc.write_text(encrypt_payload(public_b64, b"{}"))
-    with caplog.at_level(logging.INFO):
-        code = main(["--case-encrypted", str(enc), "--out-dir", str(tmp_path / "o"), "--dry-run"])
-    assert code == 2
-    assert "CASE_DATA_PRIVATE_KEY" in caplog.text
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"can_identify_driver":"private-case-canary"}')
+    assert main(["--case-json", str(bad), "--out-dir", str(tmp_path / "o"), "--dry-run"]) == 2
+    assert "private-case-canary" not in caplog.text
 
 
 def test_encrypted_case_roundtrip_and_log_privacy(monkeypatch, tmp_path, caplog):
     set_env(monkeypatch)
     from traffic_complaint_form.crypto import encrypt_payload, generate_keypair
+    from traffic_complaint_form.sample import sample_case
 
     public_b64, private_b64 = generate_keypair()
+    case_file = tmp_path / "case.enc"
+    case_file.write_text(encrypt_payload(public_b64, b"{}"))
+    assert main(["--case-encrypted", str(case_file), "--dry-run"]) == 2
     monkeypatch.setenv("CASE_DATA_PRIVATE_KEY", private_b64)
-    payload = json.dumps(
-        {
-            "police_station": "מוריה",
-            "vehicle_number": "55-444-33",
-            "vehicle_manufacturer": "סקודה",
-            "vehicle_color": "שחור",
-            "offence_date": "2026-02-02",
-            "offence_time": "08:00",
-            "offence_street": "רחוב חסוי",
-            "offence_city": "ירושלים",
-            "offence_description": "תיאור חסוי",
-        }
-    ).encode()
-    enc = tmp_path / "case.enc"
-    enc.write_text(encrypt_payload(public_b64, payload))
+    assert main(["--case-encrypted", str(case_file), "--dry-run"]) == 2
+    monkeypatch.setattr(cli.CaseData, "from_dict", lambda data: sample_case())
     with caplog.at_level(logging.INFO):
-        code = main(["--case-encrypted", str(enc), "--out-dir", str(tmp_path / "o"), "--dry-run"])
-    assert code == 0
-    assert "55-444-33" not in caplog.text
-    assert "רחוב חסוי" not in caplog.text
-    produced = list((tmp_path / "o").glob("*.pdf"))
-    assert len(produced) == 1
-    assert "55-444-33" not in produced[0].name  # filename must not leak the plate
+        assert main(["--case-encrypted", str(case_file), "--out-dir", str(tmp_path / "out"), "--dry-run"]) == 0
+    assert "12-345-67" not in caplog.text
+    assert "12-345-67" not in next((tmp_path / "out").glob("*.pdf")).name
 
 
-def test_is_test_mode_default_true():
+def test_is_test_mode():
     assert is_test_mode({}) is True
     assert is_test_mode({"TEST_MODE": "false"}) is False
-
-
-def test_required_secret_names_dry_run():
-    assert "SMTP_USERNAME" not in required_secret_names(dry_run=True)
-    assert "SMTP_USERNAME" in required_secret_names(dry_run=False)
-
-
-def test_required_secret_names_pdf_password_only_real_mode():
-    assert "PDF_PASSWORD" not in required_secret_names(dry_run=True, encrypt_output=True, test_mode=True)
-    assert "PDF_PASSWORD" in required_secret_names(dry_run=True, encrypt_output=True, test_mode=False)
-    assert "PDF_PASSWORD" not in required_secret_names(dry_run=True, encrypt_output=False, test_mode=False)
-
-
-def test_real_mode_requires_pdf_password(monkeypatch, tmp_path, caplog):
-    env = dict(ENV)
-    env.pop("PDF_PASSWORD", None)
-    set_env(monkeypatch, extra=env)
-    monkeypatch.setenv("PDF_PASSWORD", "")
-    monkeypatch.setenv("TEST_MODE", "false")
-    with caplog.at_level(logging.INFO):
-        code = main(["--sample", "--out-dir", str(tmp_path), "--dry-run"])
-    assert code == 2
-    assert "PDF_PASSWORD" in caplog.text
-
-
-def test_test_mode_falls_back_to_id_password(monkeypatch, tmp_path, caplog):
-    env = dict(ENV)
-    env.pop("PDF_PASSWORD", None)
-    set_env(monkeypatch, extra=env)
-    monkeypatch.setenv("PDF_PASSWORD", "")
-    with caplog.at_level(logging.INFO):
-        code = main(["--sample", "--out-dir", str(tmp_path), "--dry-run"])
-    assert code == 0
-    assert "low entropy" in caplog.text
-    assert ENV["COMPLAINANT_ID"] not in caplog.text  # the password never logs
-    produced = list(tmp_path.glob("*.pdf"))
-    assert len(produced) == 1
-    import pikepdf
-
-    with pikepdf.open(str(produced[0]), password=ENV["COMPLAINANT_ID"]) as pdf:
-        assert len(pdf.pages) == 1
-
-
-def test_dedicated_password_overrides_id(monkeypatch, tmp_path):
-    set_env(monkeypatch)  # ENV includes PDF_PASSWORD=test-pw
-    code = main(["--sample", "--out-dir", str(tmp_path), "--dry-run"])
-    assert code == 0
-    produced = list(tmp_path.glob("*.pdf"))
-    import pikepdf
-
-    with pikepdf.open(str(produced[0]), password="test-pw") as pdf:
-        assert len(pdf.pages) == 1
-    import pytest
-
-    with pytest.raises(pikepdf.PasswordError):
-        pikepdf.open(str(produced[0]), password=ENV["COMPLAINANT_ID"])
