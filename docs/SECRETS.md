@@ -15,8 +15,11 @@ into this repository.
 | `COMPLAINANT_PHONE` | `050-0000000` | Form field טלפון |
 | `PDF_PASSWORD` | `correct-horse-battery-staple` | Opens the encrypted PDF. **Primary for real data** - choose a hard-to-guess value. If unset, TEST_MODE falls back to `COMPLAINANT_ID` (see below) |
 | `RECIPIENT_EMAIL` | `someone@example.com` | Where the filled form is emailed |
-| `SMTP_USERNAME` | `assistant@example.com` | Gmail address of the sender account |
-| `SMTP_APP_PASSWORD` | `abcd efgh ijkl mnop` | Google app password for the sender account (needs 2FA on that account) |
+| `SMTP_HOST` | `smtp.gmail.com` | SMTP server (STARTTLS) |
+| `SMTP_PORT` | `587` | Optional; defaults to 587 |
+| `SMTP_USERNAME` | `someone@gmail.com` | Login of the sender account |
+| `SMTP_APP_PASSWORD` | `abcd efgh ijkl mnop` | App password for the sender account; the account owner creates it on their own device (Google Account -> Security -> 2-Step Verification -> App passwords) |
+| `SMTP_FROM` | `someone@gmail.com` | From header and envelope sender |
 | `CASE_DATA_PRIVATE_KEY` | `kD8...base64...` | Sealed-box private key for encrypted case payloads. The matching public key is committed at `form/keys/case-data-public.key`. Not personal data. |
 
 Repository/environment **variables** (non-secret):

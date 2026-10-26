@@ -33,7 +33,7 @@ from pathlib import Path
 from .encrypt import encrypt_pdf, verify_encrypted_pdf
 from .fill import render_form, template_base_url
 from .mail import send_encrypted_pdf
-from .models import COMPLAINANT_ENV_VARS, DELIVERY_ENV_VARS, CaseData, Complainant
+from .models import COMPLAINANT_ENV_VARS, DELIVERY_ENV_VARS, OPTIONAL_DELIVERY_ENV_VARS, CaseData, Complainant
 from .pdf import html_to_pdf
 from .sample import sample_case
 
@@ -78,7 +78,9 @@ def required_secret_names(*, dry_run: bool, encrypt_output: bool = True, test_mo
         # back to the complainant ID (already required above).
         names.append("PDF_PASSWORD")
     if not dry_run:
-        names += [name for name in DELIVERY_ENV_VARS if name != "PDF_PASSWORD"]
+        names += [
+            name for name in DELIVERY_ENV_VARS if name != "PDF_PASSWORD" and name not in OPTIONAL_DELIVERY_ENV_VARS
+        ]
     return names
 
 
@@ -194,8 +196,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         send_encrypted_pdf(
+            smtp_host=os.environ["SMTP_HOST"],
+            smtp_port=int(os.environ.get("SMTP_PORT", "").strip() or "587"),
             smtp_username=os.environ["SMTP_USERNAME"],
             smtp_password=os.environ["SMTP_APP_PASSWORD"],
+            from_address=os.environ["SMTP_FROM"],
             recipient=os.environ["RECIPIENT_EMAIL"],
             attachment_path=outfile,
             vehicle_number=case.vehicle.number,

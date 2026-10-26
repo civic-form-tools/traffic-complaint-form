@@ -77,13 +77,43 @@ def test_overflow_returns_3(monkeypatch, tmp_path):
     assert main(["--sample", "--out-dir", str(tmp_path), "--dry-run"]) == 3
 
 
+SMTP_ENV = {
+    "RECIPIENT_EMAIL": "d@example.com",
+    "SMTP_HOST": "smtp.example.com",
+    "SMTP_USERNAME": "u",
+    "SMTP_APP_PASSWORD": "p",
+    "SMTP_FROM": "f@example.com",
+}
+
+
 def test_send_path_calls_mail(monkeypatch, tmp_path):
-    set_env(monkeypatch, {"RECIPIENT_EMAIL": "d@example.com", "SMTP_USERNAME": "u", "SMTP_APP_PASSWORD": "p"})
+    set_env(monkeypatch, SMTP_ENV)
     calls = {}
     monkeypatch.setattr(cli, "send_encrypted_pdf", lambda **kw: calls.update(kw))
     assert main(["--sample", "--out-dir", str(tmp_path)]) == 0
     assert calls["recipient"] == "d@example.com"
     assert calls["vehicle_number"] == "12-345-67"
+    assert calls["smtp_host"] == "smtp.example.com"
+    assert calls["smtp_port"] == 587
+    assert calls["from_address"] == "f@example.com"
+
+
+def test_send_path_requires_smtp_host_and_from(monkeypatch, tmp_path, caplog):
+    set_env(monkeypatch, {"RECIPIENT_EMAIL": "d@example.com", "SMTP_USERNAME": "u", "SMTP_APP_PASSWORD": "p"})
+    with caplog.at_level(logging.INFO):
+        code = main(["--sample", "--out-dir", str(tmp_path)])
+    assert code == 2
+    assert "SMTP_HOST" in caplog.text
+    assert "SMTP_FROM" in caplog.text
+    assert "SMTP_PORT" not in caplog.text  # optional, defaults to 587
+
+
+def test_smtp_port_override(monkeypatch, tmp_path):
+    set_env(monkeypatch, {**SMTP_ENV, "SMTP_PORT": "465"})
+    calls = {}
+    monkeypatch.setattr(cli, "send_encrypted_pdf", lambda **kw: calls.update(kw))
+    assert main(["--sample", "--out-dir", str(tmp_path)]) == 0
+    assert calls["smtp_port"] == 465
 
 
 def test_encrypted_case_requires_private_key(monkeypatch, tmp_path, caplog):
