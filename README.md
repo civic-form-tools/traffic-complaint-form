@@ -39,7 +39,8 @@ exposed to the job.
 Use one **FILING_BUNDLE** JSON secret in the protected **production** environment,
 containing the full identity, strong PDF password, recipient and SMTP settings.
 The exact placeholder template and cutover/removal checklist are in
-[docs/SECRETS.md](docs/SECRETS.md). CASE_DATA_PRIVATE_KEY remains separate.
+[docs/SECRETS.md](docs/SECRETS.md). CASE_DATA_PRIVATE_KEY is likewise a
+production environment secret only - no secret exists at repository scope.
 No individual identity/password/delivery secret is read by the current workflow.
 Missing or partial bundles fail closed, including dry runs and sample runs.
 

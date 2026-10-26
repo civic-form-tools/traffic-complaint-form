@@ -72,3 +72,56 @@ def test_sample_verification_always_watermarked():
     workflow = yaml.safe_load(Path(".github/workflows/fill-form.yml").read_text())
     step = next(s for s in workflow["jobs"]["fill"]["steps"] if s.get("name") == "Fill, verify and send")
     assert step["env"]["TEST_MODE"] == "${{ inputs.encrypted_case == '' && 'true' || vars.TEST_MODE }}"
+
+
+FIRST_PARTY_ACTION_PREFIXES = ("actions/", "github/")
+SHA_PIN_LENGTH = 40
+
+
+def _all_step_uses(workflow):
+    for job in workflow["jobs"].values():
+        for step in job.get("steps", []):
+            if "uses" in step:
+                yield step["uses"]
+
+
+def test_every_action_is_pinned_to_a_full_commit_sha():
+    """Tags/branches are mutable; only a full SHA pins the reviewed code."""
+    for path in WORKFLOWS:
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for uses in _all_step_uses(workflow):
+            ref = uses.rsplit("@", 1)[-1]
+            assert len(ref) == SHA_PIN_LENGTH and all(c in "0123456789abcdef" for c in ref), (
+                f"{path.name}: action {uses!r} is not pinned to a full commit SHA"
+            )
+
+
+def test_gated_job_runs_only_first_party_actions():
+    """The job exposed to FILING_BUNDLE/CASE_DATA_PRIVATE_KEY must not run
+    third-party action code (checkout/setup-python are GitHub-owned)."""
+    workflow = yaml.safe_load(Path(".github/workflows/fill-form.yml").read_text())
+    job = workflow["jobs"]["fill"]
+    for step in job["steps"]:
+        uses = step.get("uses")
+        if uses:
+            assert uses.startswith(FIRST_PARTY_ACTION_PREFIXES), f"gated job uses third-party action {uses!r}"
+
+
+def test_case_key_referenced_only_inside_the_gated_job():
+    """CASE_DATA_PRIVATE_KEY must exist only as a production environment
+    secret and be referenced only by the single gated step."""
+    for path in WORKFLOWS:
+        text = path.read_text(encoding="utf-8")
+        if "CASE_DATA_PRIVATE_KEY" not in text:
+            continue
+        assert path.name == "fill-form.yml", f"{path.name} references CASE_DATA_PRIVATE_KEY"
+    workflow = yaml.safe_load(Path(".github/workflows/fill-form.yml").read_text())
+    for name, job in workflow["jobs"].items():
+        if name == "fill":
+            continue
+        assert "CASE_DATA_PRIVATE_KEY" not in str(job), f"job {name} references CASE_DATA_PRIVATE_KEY"
+    step = next(s for s in workflow["jobs"]["fill"]["steps"] if s.get("name") == "Fill, verify and send")
+    assert step["env"]["CASE_DATA_PRIVATE_KEY"] == "${{ secrets.CASE_DATA_PRIVATE_KEY }}"
+    others = [s for s in workflow["jobs"]["fill"]["steps"] if s is not step]
+    for s in others:
+        assert "CASE_DATA_PRIVATE_KEY" not in str(s)

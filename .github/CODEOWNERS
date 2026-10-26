@@ -1,1 +1,9 @@
-* @reihl
+# Code-owner review is required on main (branch protection).
+# Every change to workflow definitions or to the code that reads/handles
+# secret values must be approved by @reihl before merge.
+/.github/workflows/ @reihl
+/.github/CODEOWNERS @reihl
+/src/traffic_complaint_form/cli.py @reihl
+/src/traffic_complaint_form/config.py @reihl
+/src/traffic_complaint_form/crypto.py @reihl
+/src/traffic_complaint_form/mail.py @reihl

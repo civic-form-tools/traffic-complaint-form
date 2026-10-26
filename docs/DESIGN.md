@@ -108,8 +108,10 @@ a `bug` issue with evidence per convention.
 ## Secrets specification
 
 See docs/SECRETS.md. All values are loaded by the user; examples there are
-invented. The `CASE_DATA_PRIVATE_KEY` is a random key (not personal data)
-generated once; the public half is committed.
+invented. The `CASE_DATA_PRIVATE_KEY` is a random key (not personal data); the
+public half is committed. It was rotated on 2026-10-26 when it moved into the
+protected production environment; rotation is safe because the key protects
+only in-transit payloads, never data at rest.
 
 ## Testing strategy
 
