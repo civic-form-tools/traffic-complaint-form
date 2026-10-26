@@ -121,3 +121,13 @@ reihlinstinct), permitted self-review/admin bypass, and main-only branch
 policy as filing. The workflow now targets production, not filing. The old
 filing environment remains until the new run succeeds and its output is
 confirmed, then it is removed. The case-data key remains untouched.
+
+## Safe validation diagnostics
+
+The validate_only dispatch input checks the bundle with no PDF or email.
+Validation failures report only a fixed, allowlisted schema path (for example
+pdf_password, complainant.id_number, delivery.smtp_port, root, json). They
+never echo supplied keys or values. root/complainant/delivery means a wrong
+object shape or missing/extra keys; compare against the template. The parser
+does not expose the contents to operators. After correction by the owner,
+run the authorized sample delivery to complete cutover verification.

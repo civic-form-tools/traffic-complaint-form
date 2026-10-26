@@ -8,6 +8,7 @@ on:
         required: false
         default: ""
       sample_data: {description: "מלא נתוני דוגמה בדייקניים (לבדיקת צינור)", type: boolean, default: true}
+      validate_only: {description: "Validate configuration only; no PDF or email", type: boolean, default: false}
       dry_run: {description: "בנה והצפן בלבד, אל תשלח מייל", type: boolean, default: false}
 
 permissions:
@@ -54,6 +55,10 @@ jobs:
       - name: Fill, verify and send
         run: |
           set -e
+          if [ "$VALIDATE_ONLY" = "true" ]; then
+            python -m traffic_complaint_form --validate-config
+            exit 0
+          fi
           case "$MODE" in
             encrypted) python -m traffic_complaint_form --case-encrypted /tmp/case.enc --out-dir out ${DRY:+--dry-run} ;;
             sample)    python -m traffic_complaint_form --sample --out-dir out ${DRY:+--dry-run} ;;
@@ -63,9 +68,11 @@ jobs:
           CASE_DATA_PRIVATE_KEY: ${{ secrets.CASE_DATA_PRIVATE_KEY }}
           TEST_MODE: ${{ inputs.encrypted_case == '' && 'true' || vars.TEST_MODE }}
           ENCRYPT_OUTPUT: ${{ vars.ENCRYPT_OUTPUT }}
+          VALIDATE_ONLY: ${{ inputs.validate_only }}
           DRY: ${{ inputs.dry_run && '1' || '' }}
 
       - name: Post-run verification summary
+        if: ${{ !inputs.validate_only }}
         run: |
           python3 - <<'PY'
           import os, glob

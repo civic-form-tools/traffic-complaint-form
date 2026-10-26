@@ -57,7 +57,7 @@ def test_strict_schema_never_echoes_invalid_data(path, value):
     target[path[-1]] = value
     with pytest.raises(BundleError) as error:
         FilingConfig.from_env({"FILING_BUNDLE": json.dumps(bundle)})
-    assert str(error.value) == ERROR
+    assert str(error.value).startswith(ERROR)
 
 
 @pytest.mark.parametrize(
@@ -75,4 +75,18 @@ def test_strict_schema_never_echoes_invalid_data(path, value):
 def test_malformed_duplicate_and_unknown_fields_fail_closed(raw):
     with pytest.raises(BundleError) as error:
         FilingConfig.from_env({"FILING_BUNDLE": raw})
-    assert str(error.value) == ERROR
+    assert str(error.value).startswith(ERROR)
+
+
+def test_diagnostic_code_cannot_echo_arbitrary_value():
+    assert BundleError("private-canary").code == "schema"
+    assert "private-canary" not in str(BundleError("private-canary"))
+
+
+def test_known_field_diagnostic_and_no_values():
+    bundle = copy.deepcopy(BUNDLE)
+    bundle["pdf_password"] = "private-short"  # noqa: S105 - invented validation fixture
+    with pytest.raises(BundleError) as error:
+        FilingConfig.from_env({"FILING_BUNDLE": json.dumps(bundle)})
+    assert error.value.code == "pdf_password"
+    assert "private-short" not in str(error.value)
