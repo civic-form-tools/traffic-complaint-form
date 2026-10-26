@@ -64,6 +64,8 @@ jobs:
             sample)    python -m traffic_complaint_form --sample --out-dir out ${DRY:+--dry-run} ;;
           esac
         env:
+          # Both secrets exist ONLY as protected `production` environment secrets
+          # (no repository-level copies); this step is their sole exposure point.
           FILING_BUNDLE: ${{ secrets.FILING_BUNDLE }}
           CASE_DATA_PRIVATE_KEY: ${{ secrets.CASE_DATA_PRIVATE_KEY }}
           TEST_MODE: ${{ inputs.encrypted_case == '' && 'true' || vars.TEST_MODE }}

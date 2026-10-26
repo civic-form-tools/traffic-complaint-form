@@ -46,9 +46,15 @@ production variable. Test mode only watermarks the form; it is not proof that id
 PDF encryption is therefore mandatory in every mode, without an ID fallback.
 
 `CASE_DATA_PRIVATE_KEY` remains a separate secret for encrypted incident
-payloads. Its existing repository scope is a residual risk described below;
-it has not been migrated automatically. `TEST_MODE` is a non-secret variable
-(default true). `ENCRYPT_OUTPUT=false` now fails closed in every mode.
+payloads. Since 2026-10-26 it lives **only** as a `production` environment
+secret, next to FILING_BUNDLE; the repository-level copy was deleted. The
+keypair was rotated during the migration (the previous private key existed
+nowhere outside write-only GitHub storage), so payloads sealed with the
+retired public key cannot be opened - callers re-encrypt with the current
+`form/keys/case-data-public.key`. Rotation is always safe here: the key
+protects only in-transit payloads, never data at rest. `TEST_MODE` is a
+non-secret variable (default true). `ENCRYPT_OUTPUT=false` now fails closed
+in every mode.
 
 ## Cutover and removal
 
@@ -63,8 +69,10 @@ it has not been migrated automatically. `TEST_MODE` is a non-secret variable
    COMPLAINANT_FIRST_NAME, COMPLAINANT_LAST_NAME, COMPLAINANT_ID,
    COMPLAINANT_ADDRESS, COMPLAINANT_PHONE, PDF_PASSWORD, RECIPIENT_EMAIL,
    SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_APP_PASSWORD, SMTP_FROM.
-5. Verify deletion by listing names only. Keep FILING_BUNDLE and
-   CASE_DATA_PRIVATE_KEY. Cancel or do not approve old queued runs: runs on
+5. Verify deletion by listing names only. Keep FILING_BUNDLE.
+   CASE_DATA_PRIVATE_KEY was migrated separately (see above): it is a
+   `production` environment secret only, with no repository-level copy.
+   Cancel or do not approve old queued runs: runs on
    old commits still use the old workflow. Do not rerun those after cutover.
 
 Existing PDFs keep their original passwords; replacing the bundle does not
@@ -89,15 +97,27 @@ The production environment is restricted to the main branch, and the checked-in
 workflow also refuses non-main refs. The environment branch rule is the
 real protection against a rewritten workflow on another branch. A malicious
 change merged into main can still read and exfiltrate the entire bundle
-when approved. An independent owner review of every workflow/runtime change,
-restricted admin access, no admin bypass and independent deployment approval
-are needed if distrust of the code author is a requirement.
+when approved.
 
-At audit time SMTP_APP_PASSWORD and CASE_DATA_PRIVATE_KEY are repository
-secrets, while the ten other configured individual fields are in filing.
-Repository secrets are not protected by an environment gate. The old SMTP
-password is removed after the bundle test. Moving the case-data private key
-requires a separate owner-controlled migration; it remains a known risk.
+Since 2026-10-26 that gap is narrowed by review enforcement: branch
+protection on main requires one approving review, requires review from the
+code owner, dismisses stale approvals and requires approval of the last
+push. CODEOWNERS assigns every workflow file, CODEOWNERS itself and the
+modules that read or handle secret values (cli.py, config.py, crypto.py,
+mail.py) to @reihl, so changes to the machinery that can exfiltrate secrets
+cannot merge without his approval. Two honest limits: GitHub applies the
+one-approval rule to every PR, not only owned paths, so routine merges also
+wait for a reviewer; and `enforce_admins` blocks protection bypass but no
+repository setting can stop an administrator (reihl or reihlinstinct) from
+editing the protection rules themselves - closing that fully requires
+removing an admin or moving control to an org-level ruleset.
+
+At audit time SMTP_APP_PASSWORD and CASE_DATA_PRIVATE_KEY were repository
+secrets, while the ten other configured individual fields were in filing.
+Repository secrets are not protected by an environment gate. Both have since
+been removed from repository scope (2026-10-26): the SMTP password moved into
+FILING_BUNDLE, and the case-data private key was rotated into the production
+environment. No secret now exists at repository scope.
 
 Ordinary fork PRs do not receive Actions secrets; CI approval is not approval
 to expose secrets. Never run untrusted PR code in a privileged context (for

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `CASE_DATA_PRIVATE_KEY` moved out of repository secrets into the protected
+  `production` environment; the keypair was rotated in the process (GitHub
+  secrets are unreadable, and no outside copy existed). Payloads sealed with
+  the retired public key must be re-encrypted with the new committed key.
+- Branch protection on main now requires one approving review with required
+  code-owner review, stale-review dismissal and last-push approval;
+  CODEOWNERS assigns the workflow files, CODEOWNERS itself and the
+  secret-reading modules (cli.py, config.py, crypto.py, mail.py) to @reihl.
+- Workflow regression guards: every action pinned to a full commit SHA, the
+  gated job runs only first-party actions, and `CASE_DATA_PRIVATE_KEY` may be
+  referenced only inside the gated job's single secret-exposed step.
+
 ## 0.1.0 - 2026-10-26
 
 Initial release.
