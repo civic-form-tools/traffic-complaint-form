@@ -26,6 +26,7 @@ dev = [
 
 [project.scripts]
 traffic-complaint-form = "traffic_complaint_form.cli:main"
+traffic-complaint-form-encrypt-case = "traffic_complaint_form.crypto:encrypt_case_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

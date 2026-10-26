@@ -17,6 +17,10 @@ Initial release.
   `ENCRYPT_OUTPUT=false` allowed only in `TEST_MODE` (dummy phase).
 - Delivery over Gmail SMTP (STARTTLS, app password); every run gated by the
   `filing` environment's required reviewer.
+- `police_station` is optional and defaults to `ירושלים` (nothing is
+  submitted anywhere - the PDF is only emailed to the complainant).
+- Caller-side `traffic-complaint-form-encrypt-case` console script wired in
+  `pyproject.toml`; full payload schema documented in `docs/CASE_DATA.md`.
 - CI: ruff + pytest (Python 3.10-3.13) with an 80% coverage floor and a
   per-test report, pip-audit, CodeQL, dependency review; Dependabot for pip
   and actions; all actions pinned to SHAs.

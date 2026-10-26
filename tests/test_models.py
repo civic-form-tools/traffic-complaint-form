@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 
 from traffic_complaint_form.models import (
+    DEFAULT_POLICE_STATION,
     CaseData,
     Complainant,
     TriState,
@@ -71,8 +72,16 @@ def test_case_from_dict_missing_required_lists_all():
     with pytest.raises(ValueError) as excinfo:
         CaseData.from_dict({"vehicle_number": "1"})
     message = str(excinfo.value)
-    assert "police_station" in message
     assert "offence_description" in message
+    assert "vehicle_manufacturer" in message
+    assert "police_station" not in message  # optional since it defaults to ירושלים
+
+
+def test_case_from_dict_station_defaults_to_jerusalem():
+    data = {k: v for k, v in VALID_CASE.items() if k != "police_station"}
+    assert CaseData.from_dict(data).police_station == DEFAULT_POLICE_STATION
+    assert CaseData.from_dict({**VALID_CASE, "police_station": "  "}).police_station == DEFAULT_POLICE_STATION
+    assert CaseData.from_dict({**VALID_CASE, "police_station": "מוריה"}).police_station == "מוריה"
 
 
 def test_case_from_dict_bad_time():

@@ -31,6 +31,10 @@ HEBREW_WEEKDAYS = {
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TIME_RE = re.compile(r"^\d{2}:\d{2}$")
 
+# Nothing is submitted to a station - the PDF is only emailed to the complainant
+# for review - so the station line is a formality. Default per user decision.
+DEFAULT_POLICE_STATION = "ירושלים"
+
 COMPLAINANT_ENV_VARS = (
     "COMPLAINANT_FIRST_NAME",
     "COMPLAINANT_LAST_NAME",
@@ -183,7 +187,6 @@ class CaseData:
     witness: Witness = field(default_factory=Witness)
 
     REQUIRED_INPUTS = (
-        "police_station",
         "vehicle_number",
         "vehicle_manufacturer",
         "vehicle_color",
@@ -245,7 +248,7 @@ class CaseData:
         if offence_date is None or complaint_date is None:  # pragma: no cover - guarded above
             raise ValueError("offence_date and complaint_date could not be resolved")
         return cls(
-            police_station=text("police_station"),
+            police_station=text("police_station") or DEFAULT_POLICE_STATION,
             complaint_date=complaint_date,
             vehicle=Vehicle(
                 number=text("vehicle_number"),

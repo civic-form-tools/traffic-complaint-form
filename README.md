@@ -69,7 +69,8 @@ traffic-complaint-form-encrypt-case --in case.json --out case.enc
 ```
 
 The workflow decrypts it in memory; logs and the output filename carry no
-plates or locations.
+plates or locations. The exact payload schema, defaults and caller steps:
+[docs/CASE_DATA.md](docs/CASE_DATA.md).
 
 ## Development
 
