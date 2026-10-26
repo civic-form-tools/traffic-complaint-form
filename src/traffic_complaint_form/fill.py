@@ -11,7 +11,7 @@ import html
 from importlib import resources
 from string import Template
 
-from .models import CaseData, Complainant, TriState
+from .models import CaseData, Complainant, TriState, Witness
 
 PACKAGE = "traffic_complaint_form"
 TEMPLATE_NAME = "templates/form.html"
@@ -46,7 +46,23 @@ def bool_yes_no_html(value: bool) -> str:
 WATERMARK_HTML = '<div class="watermark">בדיקה - לא לשליחה</div>'
 
 
+def _effective_witness(case: CaseData, complainant: Complainant) -> Witness:
+    """Witness section: an explicitly given witness wins; when the case names
+    no witness, the complainant himself is the witness (form requirement,
+    user decision 2026-10-26).
+    """
+    if not case.witness.is_empty:
+        return case.witness
+    return Witness(
+        name=f"{complainant.first_name} {complainant.last_name}",
+        id_number=complainant.id_number,
+        phone=complainant.phone,
+        address=complainant.address,
+    )
+
+
 def build_mapping(case: CaseData, complainant: Complainant, *, test_mode: bool = False) -> dict[str, str]:
+    witness = _effective_witness(case, complainant)
     description = "<br>\n".join(_escape(line) for line in case.offence.description.splitlines())
     return {
         "STATION": _escape(case.police_station),
@@ -73,10 +89,10 @@ def build_mapping(case: CaseData, complainant: Complainant, *, test_mode: bool =
         "C_ADDRESS": _escape(complainant.address),
         "C_PHONE": _escape(complainant.phone),
         "WILLING_TO_TESTIFY": bool_yes_no_html(case.willing_to_testify),
-        "WITNESS_NAME": _escape(case.witness.name),
-        "WITNESS_ID": _escape(case.witness.id_number),
-        "WITNESS_PHONE": _escape(case.witness.phone),
-        "WITNESS_ADDRESS": _escape(case.witness.address),
+        "WITNESS_NAME": _escape(witness.name),
+        "WITNESS_ID": _escape(witness.id_number),
+        "WITNESS_PHONE": _escape(witness.phone),
+        "WITNESS_ADDRESS": _escape(witness.address),
         "WATERMARK": WATERMARK_HTML if test_mode else "",
     }
 
