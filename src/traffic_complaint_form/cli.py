@@ -94,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     if not encrypt_output and not test_mode:
         logger.error("ENCRYPT_OUTPUT=false is allowed only while TEST_MODE=true (dummy data) - refusing to run")
         return EXIT_UNSAFE
+
     def _is_set(name: str) -> bool:
         # Value stays inside this helper; only the boolean leaves, so the
         # names-only error below can never carry a secret into the logs.
