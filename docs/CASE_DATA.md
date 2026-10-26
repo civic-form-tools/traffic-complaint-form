@@ -51,6 +51,24 @@ One JSON object per complaint. Keys not listed here are ignored.
 | `willing_to_testify` | `yes` | `yes` / `no`. |
 | `driver_name`, `driver_address`, `driver_identifying_marks` | `""` | Free text. |
 | `witness_name`, `witness_id`, `witness_phone`, `witness_address` | complainant | When all four are blank, the witness section is filled with the complainant's own details (from Secrets). An explicit witness always wins. |
+| `incidents` | - | Optional non-empty list of incident objects (schema below). When present with 2+ entries, the form becomes a **merged complaint**: one PDF for the vehicle with an incidents table (continuation page allowed). A single-entry list renders exactly like the classic form. |
+| `municipal_case` | `""` | Only inside an incident object: municipal report reference (אסמכתא), printed in the table's ref column. |
+
+### Incident object (inside `incidents`)
+
+| Key | Required | Format |
+| --- | --- | --- |
+| `offence_date` | yes | `YYYY-MM-DD` |
+| `offence_time` | yes | `HH:MM` |
+| `offence_street` | yes | string |
+| `offence_city` | yes | string |
+| `offence_description` | yes | short free text (one row of the table) |
+| `offence_junction_or_house` | no | string |
+| `offence_day` | no | Hebrew weekday; derived from the date when blank |
+| `municipal_case` | no | municipal report reference |
+
+With `incidents`, the top-level `offence_*` keys are not required. Keep
+descriptions short: the merged form allows at most 3 pages.
 
 ## Example (all values invented)
 

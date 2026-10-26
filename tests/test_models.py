@@ -108,3 +108,107 @@ def test_sample_case_is_well_formed():
     case = sample_case()
     assert case.police_station
     assert case.offence.day == hebrew_weekday(case.offence.date)
+
+
+def _base_without_offence():
+    return {k: v for k, v in VALID_CASE.items() if not k.startswith("offence_")}
+
+
+def test_case_from_dict_incidents_multi():
+    case = CaseData.from_dict(
+        {
+            **_base_without_offence(),
+            "incidents": [
+                {
+                    "offence_date": "2026-01-10",
+                    "offence_time": "08:00",
+                    "offence_street": "רחוב א",
+                    "offence_city": "ירושלים",
+                    "offence_description": "חניה על מדרכה",
+                    "municipal_case": "2610-0000001",
+                },
+                {
+                    "offence_date": "2026-01-12",
+                    "offence_time": "19:30",
+                    "offence_street": "רחוב ב",
+                    "offence_junction_or_house": "מס' 3",
+                    "offence_city": "ירושלים",
+                    "offence_description": "חניה כפולה",
+                },
+            ],
+        }
+    )
+    assert len(case.incidents) == 2
+    assert case.incidents[0].municipal_case == "2610-0000001"
+    assert case.offence.date == date(2026, 1, 10)  # mirrors the first incident
+    assert case.incidents[1].day == hebrew_weekday(date(2026, 1, 12))
+    assert case.incidents[1].municipal_case == ""
+
+
+def test_case_from_dict_single_incident_list_is_classic():
+    case = CaseData.from_dict(
+        {
+            **_base_without_offence(),
+            "incidents": [
+                {
+                    "offence_date": "2026-01-10",
+                    "offence_time": "08:00",
+                    "offence_street": "רחוב א",
+                    "offence_city": "ירושלים",
+                    "offence_description": "חניה על מדרכה",
+                }
+            ],
+        }
+    )
+    assert case.incidents == ()
+    assert case.offence.street == "רחוב א"
+
+
+def test_case_from_dict_incident_missing_field_names_position_only():
+    with pytest.raises(ValueError) as excinfo:
+        CaseData.from_dict(
+            {
+                **_base_without_offence(),
+                "incidents": [
+                    {
+                        "offence_date": "2026-01-10",
+                        "offence_time": "08:00",
+                        "offence_street": "רחוב א",
+                        "offence_city": "ירושלים",
+                        "offence_description": "א",
+                    },
+                    {
+                        "offence_date": "2026-01-12",
+                        "offence_street": "רחוב ב",
+                        "offence_city": "ירושלים",
+                        "offence_description": "ב",
+                    },
+                ],
+            }
+        )
+    message = str(excinfo.value)
+    assert "incident #2" in message
+    assert "offence_time" in message
+
+
+def test_case_from_dict_incidents_empty_rejected():
+    with pytest.raises(ValueError, match="non-empty"):
+        CaseData.from_dict({**VALID_CASE, "incidents": []})
+
+
+def test_case_from_dict_incident_bad_date():
+    with pytest.raises(ValueError, match="incident #1"):
+        CaseData.from_dict(
+            {
+                **_base_without_offence(),
+                "incidents": [
+                    {
+                        "offence_date": "10/01/2026",
+                        "offence_time": "08:00",
+                        "offence_street": "רחוב א",
+                        "offence_city": "ירושלים",
+                        "offence_description": "א",
+                    }
+                ],
+            }
+        )

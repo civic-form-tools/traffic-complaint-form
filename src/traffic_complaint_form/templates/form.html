@@ -22,6 +22,12 @@ p { margin: 1.2mm 0; line-height: 1.85; }
 .footer img { height: 10mm; }
 .footer .site { text-decoration: underline; }
 .muted { color: #333; font-size: 8.5pt; }
+table.incidents { width: 100%; border-collapse: collapse; font-size: 8.6pt; margin-top: 1.5mm; }
+table.incidents th, table.incidents td { border: 0.4pt solid #555; padding: 1mm 1.6mm; text-align: right; vertical-align: top; }
+table.incidents thead { display: table-header-group; }
+table.incidents th { background: #eee; }
+.desc.multi { min-height: 0; background: none; line-height: 1.6; }
+.multi-summary { font-weight: 600; }
 .watermark { position: fixed; top: 40%; right: 2%; width: 96%; text-align: center; transform: rotate(-32deg);
   font-size: 46pt; font-weight: bold; color: rgba(180, 30, 30, 0.16); z-index: 100; }
 </style>
@@ -43,11 +49,10 @@ $WATERMARK
 <p>האם קיימת היכרות עם הנילו&quot;ע $KNOWS_DRIVER (למחוק את המיותר)</p>
 
 <h2>פרטי העבירה:</h2>
-<p>תאריך <span class="blank">$OFFENCE_DATE</span> יום <span class="blank">$OFFENCE_DAY</span> שעה <span class="blank">$OFFENCE_TIME</span> , רח'/כביש <span class="blank wide">$OFFENCE_STREET</span></p>
-<p>צומת רח'/כביש ו/או מס' בית <span class="blank wide">$OFFENCE_JUNCTION</span> עיר <span class="blank">$OFFENCE_CITY</span></p>
+$OFFENCE_BLOCK
 
 <h2>תיאור העבירה:</h2>
-<div class="desc">$OFFENCE_DESCRIPTION</div>
+$DESCRIPTION_BLOCK
 
 <h2>פרטי המתלונן:</h2>
 <p>שם: <span class="blank">$C_FIRST_NAME</span> , משפחה: <span class="blank">$C_LAST_NAME</span> , ת.ז.: <span class="blank">$C_ID</span> , כתובת: <span class="blank wide">$C_ADDRESS</span></p>

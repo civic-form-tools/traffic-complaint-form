@@ -93,7 +93,7 @@ def is_valid_israeli_id(id_number: str) -> bool:
 def parse_iso_date(value: str, *, field_name: str) -> date:
     text = (value or "").strip()
     if not DATE_RE.match(text):
-        raise ValueError(f"{field_name} must be YYYY-MM-DD, got {value!r}")
+        raise ValueError(f"{field_name} must be YYYY-MM-DD")
     return datetime.strptime(text, "%Y-%m-%d").date()
 
 
@@ -171,6 +171,20 @@ class Witness:
 
 
 @dataclass(frozen=True)
+class Incident:
+    """One offence event. Several incidents may share a vehicle (merged complaint)."""
+
+    date: date
+    day: str
+    time: str
+    street: str
+    junction_or_house: str
+    city: str
+    description: str
+    municipal_case: str = ""
+
+
+@dataclass(frozen=True)
 class CaseData:
     """Non-secret complaint details, supplied as workflow inputs."""
 
@@ -185,11 +199,17 @@ class CaseData:
     driver_address: str = ""
     driver_identifying_marks: str = ""
     witness: Witness = field(default_factory=Witness)
+    # Populated only for a merged multi-incident complaint (2+ incidents);
+    # stays empty for the classic single-incident form.
+    incidents: tuple[Incident, ...] = ()
 
-    REQUIRED_INPUTS = (
+    VEHICLE_REQUIRED = (
         "vehicle_number",
         "vehicle_manufacturer",
         "vehicle_color",
+    )
+
+    OFFENCE_REQUIRED = (
         "offence_date",
         "offence_time",
         "offence_street",
@@ -197,37 +217,79 @@ class CaseData:
         "offence_description",
     )
 
+    # Keys required when no incidents[] list is supplied (backward compatibility).
+    REQUIRED_INPUTS = VEHICLE_REQUIRED + OFFENCE_REQUIRED
+
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> CaseData:
         problems: list[str] = []
 
-        def text(key: str) -> str:
-            return str(data.get(key, "") or "").strip()
+        def text(key: str, source: Mapping[str, Any] = data) -> str:
+            return str(source.get(key, "") or "").strip()
 
-        for key in cls.REQUIRED_INPUTS:
+        for key in cls.VEHICLE_REQUIRED:
             if not text(key):
                 problems.append(f"missing required input: {key}")
 
-        offence_date = None
-        if text("offence_date"):
-            try:
-                offence_date = parse_iso_date(text("offence_date"), field_name="offence_date")
-            except ValueError as exc:
-                problems.append(str(exc))
+        def parse_incident(source: Mapping[str, Any], label: str) -> Incident | None:
+            """Validate one incident. label identifies the entry by position, never by content."""
+            prefix = f"{label}: " if label else ""
+            ok = True
+            for key in cls.OFFENCE_REQUIRED:
+                if not text(key, source):
+                    problems.append(f"{prefix}missing required input: {key}")
+                    ok = False
+            incident_date = None
+            if text("offence_date", source):
+                try:
+                    incident_date = parse_iso_date(text("offence_date", source), field_name=f"{prefix}offence_date")
+                except ValueError as exc:
+                    problems.append(str(exc))
+                    ok = False
+            incident_time = text("offence_time", source)
+            if incident_time and not TIME_RE.match(incident_time):
+                problems.append(f"{prefix}offence_time must be HH:MM")
+                ok = False
+            if not ok or incident_date is None:
+                return None
+            return Incident(
+                date=incident_date,
+                day=text("offence_day", source) or hebrew_weekday(incident_date),
+                time=incident_time,
+                street=text("offence_street", source),
+                junction_or_house=text("offence_junction_or_house", source),
+                city=text("offence_city", source),
+                description=str(source.get("offence_description", "")).strip(),
+                municipal_case=text("municipal_case", source),
+            )
+
+        incidents: list[Incident] = []
+        raw_incidents = data.get("incidents")
+        if raw_incidents is not None:
+            if not isinstance(raw_incidents, list) or not raw_incidents:
+                problems.append("incidents must be a non-empty list of objects")
+            else:
+                for index, item in enumerate(raw_incidents, start=1):
+                    if not isinstance(item, Mapping):
+                        problems.append(f"incident #{index}: must be an object")
+                        continue
+                    parsed = parse_incident(item, f"incident #{index}")
+                    if parsed is not None:
+                        incidents.append(parsed)
+        else:
+            single = parse_incident(data, "")
+            if single is not None:
+                incidents.append(single)
 
         complaint_date_raw = text("complaint_date")
+        complaint_date = None
         if complaint_date_raw:
             try:
                 complaint_date = parse_iso_date(complaint_date_raw, field_name="complaint_date")
             except ValueError as exc:
                 problems.append(str(exc))
-                complaint_date = None
         else:
             complaint_date = datetime.now(JERUSALEM_TZ).date()
-
-        offence_time = text("offence_time")
-        if offence_time and not TIME_RE.match(offence_time):
-            problems.append(f"offence_time must be HH:MM, got {offence_time!r}")
 
         try:
             can_identify = TriState.parse(text("can_identify_driver"))
@@ -237,16 +299,12 @@ class CaseData:
             can_identify = TriState.UNKNOWN
             knows_driver = TriState.UNKNOWN
 
-        if offence_date is not None:
-            offence_day = text("offence_day") or hebrew_weekday(offence_date)
-        else:
-            offence_day = text("offence_day")
-
         if problems:
             raise ValueError("; ".join(problems))
 
-        if offence_date is None or complaint_date is None:  # pragma: no cover - guarded above
-            raise ValueError("offence_date and complaint_date could not be resolved")
+        if not incidents or complaint_date is None:  # pragma: no cover - guarded above
+            raise ValueError("no valid incident could be parsed")
+        first = incidents[0]
         return cls(
             police_station=text("police_station") or DEFAULT_POLICE_STATION,
             complaint_date=complaint_date,
@@ -257,13 +315,13 @@ class CaseData:
                 type=text("vehicle_type"),
             ),
             offence=Offence(
-                date=offence_date,
-                day=offence_day,
-                time=offence_time,
-                street=text("offence_street"),
-                junction_or_house=text("offence_junction_or_house"),
-                city=text("offence_city"),
-                description=str(data.get("offence_description", "")).strip(),
+                date=first.date,
+                day=first.day,
+                time=first.time,
+                street=first.street,
+                junction_or_house=first.junction_or_house,
+                city=first.city,
+                description=first.description,
             ),
             can_identify_driver=can_identify,
             knows_driver=knows_driver,
@@ -277,4 +335,5 @@ class CaseData:
                 phone=text("witness_phone"),
                 address=text("witness_address"),
             ),
+            incidents=tuple(incidents) if len(incidents) > 1 else (),
         )

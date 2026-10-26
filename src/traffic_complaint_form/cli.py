@@ -169,8 +169,13 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             logger.exception("Failed to render the form PDF")
             return EXIT_FAILED
-        if pages != 1:
-            logger.error("Rendered form is %s pages, expected 1 - shorten the description", pages)
+        max_pages = 3 if len(case.incidents) > 1 else 1
+        if not 1 <= pages <= max_pages:
+            logger.error(
+                "Rendered form is %s pages, expected %s - shorten the description(s)",
+                pages,
+                "1" if max_pages == 1 else f"1-{max_pages}",
+            )
             return EXIT_OVERFLOW
         if encrypt_output:
             if pdf_password is None:
@@ -178,7 +183,8 @@ def main(argv: list[str] | None = None) -> int:
                 return EXIT_MISSING_CONFIG
             try:
                 encrypt_pdf(plain_pdf, outfile, password=pdf_password)
-                verify_encrypted_pdf(outfile, password=pdf_password, expected_pages=1)
+                multi = len(case.incidents) > 1
+                verify_encrypted_pdf(outfile, password=pdf_password, expected_pages=None if multi else 1)
             except Exception:
                 logger.exception("Encryption or post-encryption verification failed")
                 outfile.unlink(missing_ok=True)
