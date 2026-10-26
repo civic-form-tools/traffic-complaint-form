@@ -19,6 +19,11 @@ Initial release.
   `filing` environment's required reviewer.
 - `police_station` is optional and defaults to `ירושלים` (nothing is
   submitted anywhere - the PDF is only emailed to the complainant).
+- Merged complaints: an optional `incidents[]` payload list renders one PDF
+  per vehicle with an incidents table (date/day/time/location/description/
+  municipal case ref) and a continuation page when needed; page-count
+  verification relaxes to 1-3 pages only in multi-incident mode.
+- Validation errors no longer echo rejected date/time values (log privacy).
 - Caller-side `traffic-complaint-form-encrypt-case` console script wired in
   `pyproject.toml`; full payload schema documented in `docs/CASE_DATA.md`.
 - CI: ruff + pytest (Python 3.10-3.13) with an 80% coverage floor and a

@@ -26,8 +26,12 @@ def encrypt_pdf(source: Path, target: Path, *, password: str) -> None:
         )
 
 
-def verify_encrypted_pdf(path: Path, *, password: str, expected_pages: int = 1) -> None:
-    """Confirm the file is unreadable without the password and well-formed with it."""
+def verify_encrypted_pdf(path: Path, *, password: str, expected_pages: int | None = 1) -> None:
+    """Confirm the file is unreadable without the password and well-formed with it.
+
+    expected_pages=None accepts any page count: a merged multi-incident
+    complaint may spill onto a continuation page (the CLI caps the total).
+    """
     try:
         with pikepdf.open(str(path)):
             pass
@@ -37,7 +41,10 @@ def verify_encrypted_pdf(path: Path, *, password: str, expected_pages: int = 1) 
         raise EncryptionVerificationError(f"{path.name} opens WITHOUT a password - refusing to deliver it") from None
     with pikepdf.open(str(path), password=password) as pdf:
         pages = len(pdf.pages)
-    if pages != expected_pages:
+    if expected_pages is None:
+        if pages < 1:
+            raise EncryptionVerificationError(f"{path.name} has no pages")
+    elif pages != expected_pages:
         raise EncryptionVerificationError(
             f"{path.name} has {pages} pages, expected {expected_pages} - check the description length"
         )

@@ -11,7 +11,7 @@ import html
 from importlib import resources
 from string import Template
 
-from .models import CaseData, Complainant, TriState, Witness
+from .models import CaseData, Complainant, Incident, TriState, Witness
 
 PACKAGE = "traffic_complaint_form"
 TEMPLATE_NAME = "templates/form.html"
@@ -61,9 +61,66 @@ def _effective_witness(case: CaseData, complainant: Complainant) -> Witness:
     )
 
 
+def _incident_location(incident: Incident) -> str:
+    location = incident.street
+    if incident.junction_or_house:
+        location = f"{location} {incident.junction_or_house}"
+    return f"{location}, {incident.city}"
+
+
+def _incidents_table_html(case: CaseData) -> str:
+    rows = []
+    for index, incident in enumerate(case.incidents, start=1):
+        description = "<br>\n".join(_escape(line) for line in incident.description.splitlines())
+        rows.append(
+            "<tr>"
+            f"<td>{index}</td>"
+            f"<td>{incident.date.strftime('%d/%m/%Y')}</td>"
+            f"<td>{_escape(incident.day)}</td>"
+            f"<td>{_escape(incident.time)}</td>"
+            f"<td>{_escape(_incident_location(incident))}</td>"
+            f"<td>{description}</td>"
+            f"<td>{_escape(incident.municipal_case)}</td>"
+            "</tr>"
+        )
+    return (
+        '<table class="incidents"><thead><tr>'
+        "<th>#</th><th>תאריך</th><th>יום</th><th>שעה</th><th>מיקום</th>"
+        "<th>תיאור העבירה</th><th>אסמכתא (מס' דוח)</th>"
+        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+    )
+
+
+def _offence_block_html(case: CaseData) -> str:
+    """Classic single-offence lines, or a summary + incidents table when merged."""
+    if len(case.incidents) <= 1:
+        return (
+            f'<p>תאריך <span class="blank">{case.offence.date.strftime("%d/%m/%Y")}</span>'
+            f' יום <span class="blank">{_escape(case.offence.day)}</span>'
+            f' שעה <span class="blank">{_escape(case.offence.time)}</span>'
+            f" , רח'/כביש "
+            f'<span class="blank wide">{_escape(case.offence.street)}</span></p>\n'
+            f"<p>צומת רח'/כביש ו/או מס' בית "
+            f'<span class="blank wide">{_escape(case.offence.junction_or_house)}</span>'
+            f' עיר <span class="blank">{_escape(case.offence.city)}</span></p>'
+        )
+    count = len(case.incidents)
+    return f'<p class="multi-summary">הרכב ביצע {count} עבירות, כמפורט בטבלה שלהלן:</p>\n' + _incidents_table_html(case)
+
+
+def _description_block_html(case: CaseData) -> str:
+    if len(case.incidents) <= 1:
+        description = "<br>\n".join(_escape(line) for line in case.offence.description.splitlines())
+        return f'<div class="desc">{description}</div>'
+    count = len(case.incidents)
+    return (
+        f'<div class="desc multi">ב-{count} המועדים המפורטים בטבלה שלעיל, הרכב ביצע את העבירות '
+        'המצוינות לכל מועד בעמודה "תיאור העבירה".</div>'
+    )
+
+
 def build_mapping(case: CaseData, complainant: Complainant, *, test_mode: bool = False) -> dict[str, str]:
     witness = _effective_witness(case, complainant)
-    description = "<br>\n".join(_escape(line) for line in case.offence.description.splitlines())
     return {
         "STATION": _escape(case.police_station),
         "COMPLAINT_DATE": case.complaint_date.strftime("%d/%m/%Y"),
@@ -82,7 +139,8 @@ def build_mapping(case: CaseData, complainant: Complainant, *, test_mode: bool =
         "OFFENCE_STREET": _escape(case.offence.street),
         "OFFENCE_JUNCTION": _escape(case.offence.junction_or_house),
         "OFFENCE_CITY": _escape(case.offence.city),
-        "OFFENCE_DESCRIPTION": description,
+        "OFFENCE_BLOCK": _offence_block_html(case),
+        "DESCRIPTION_BLOCK": _description_block_html(case),
         "C_FIRST_NAME": _escape(complainant.first_name),
         "C_LAST_NAME": _escape(complainant.last_name),
         "C_ID": _escape(complainant.id_number),

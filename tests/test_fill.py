@@ -1,8 +1,8 @@
 import re
 
 from traffic_complaint_form.fill import build_mapping, render_form, yes_no_html
-from traffic_complaint_form.models import TriState
-from traffic_complaint_form.sample import sample_case
+from traffic_complaint_form.models import CaseData, TriState
+from traffic_complaint_form.sample import sample_case, sample_multi_case
 
 
 def test_render_has_no_unfilled_placeholders(complainant):
@@ -27,12 +27,12 @@ def test_yes_no_html_strikes_unselected():
 def test_description_multiline_becomes_br(complainant):
     case = sample_case()
     mapping = build_mapping(case, complainant)
-    assert mapping["OFFENCE_DESCRIPTION"]  # non-empty
+    assert mapping["DESCRIPTION_BLOCK"]  # non-empty
     case2 = case.__class__(
         **{**case.__dict__, "offence": case.offence.__class__(**{**case.offence.__dict__, "description": "א\nב"})}
     )
     mapping2 = build_mapping(case2, complainant)
-    assert "א<br>" in mapping2["OFFENCE_DESCRIPTION"]
+    assert "א<br>" in mapping2["DESCRIPTION_BLOCK"]
 
 
 def test_test_mode_adds_watermark(complainant):
@@ -62,3 +62,44 @@ def test_explicit_witness_wins(complainant):
     assert "עד ראייה" in witness_line
     assert "000000018" in witness_line
     assert complainant.id_number not in witness_line
+
+
+def test_multi_incident_renders_table(complainant):
+    case = sample_multi_case()
+    html_text = render_form(case, complainant)
+    assert 'class="incidents"' in html_text
+    assert html_text.count("<tr>") == len(case.incidents) + 1  # body rows + header row
+    assert "2610-0000002" in html_text  # synthetic municipal case ref
+    assert "3 עבירות" in html_text
+    assert "$" not in html_text
+
+
+def test_multi_incident_values_are_escaped(complainant):
+    case = sample_multi_case()
+    evil = CaseData.from_dict(
+        {
+            "vehicle_number": "12-345-67",
+            "vehicle_manufacturer": "<b>x</b>",
+            "vehicle_color": "לבן",
+            "incidents": [
+                {
+                    "offence_date": "2026-01-10",
+                    "offence_time": "08:00",
+                    "offence_street": "<script>alert(1)</script>",
+                    "offence_city": "ירושלים",
+                    "offence_description": "א",
+                },
+                {
+                    "offence_date": "2026-01-12",
+                    "offence_time": "19:30",
+                    "offence_street": "ב",
+                    "offence_city": "ירושלים",
+                    "offence_description": "ב",
+                },
+            ],
+        }
+    )
+    html_text = render_form(evil, complainant)
+    assert "<script>" not in html_text
+    assert "&lt;script&gt;" in html_text
+    assert case.incidents  # silence unused-variable style complaints

@@ -8,7 +8,7 @@ from traffic_complaint_form.encrypt import (
 )
 from traffic_complaint_form.fill import render_form, template_base_url
 from traffic_complaint_form.pdf import html_to_pdf
-from traffic_complaint_form.sample import sample_case
+from traffic_complaint_form.sample import sample_case, sample_multi_case
 
 
 @pytest.fixture()
@@ -42,3 +42,11 @@ def test_verify_passes_on_good_file(tmp_path, plain_pdf):
 def test_verify_rejects_unencrypted(tmp_path, plain_pdf):
     with pytest.raises(EncryptionVerificationError):
         verify_encrypted_pdf(plain_pdf, password="pw-123")
+
+
+def test_verify_allows_any_page_count_when_unspecified(tmp_path, complainant):
+    plain = tmp_path / "plain.pdf"
+    html_to_pdf(render_form(sample_multi_case(), complainant), base_url=template_base_url(), out_path=plain)
+    enc = tmp_path / "enc.pdf"
+    encrypt_pdf(plain, enc, password="pw-123")
+    verify_encrypted_pdf(enc, password="pw-123", expected_pages=None)
