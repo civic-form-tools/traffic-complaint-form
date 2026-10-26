@@ -181,7 +181,14 @@ must approve it like the rest of the secret-handling surface.
 - **Hosted remote MCP endpoint:** an internet-facing service accepting
   national ID numbers is a spam/abuse magnet, needs hosting terms and
   money-adjacent decisions, and gains nothing while dispatch stays
-  collaborator-gated. Rejected; revisit only if strangers need self-serve.
+  collaborator-gated. Rejected as a standing service; revisit only if
+  strangers need self-serve. A narrower exception is implemented for
+  personal review: HTTP mode (TCF_MCP_TRANSPORT=http) behind a per-session
+  bearer token, meant to sit on the operator's own machine behind a
+  time-boxed tunnel. That instance is synthetic-only by construction - the
+  dispatch and status tools are not registered at all, so it cannot send,
+  file or touch secrets. Fail-closed: it refuses to start without a 16+
+  character bearer token.
 - **Per-person GitHub Secrets:** exactly the "stored by us" model the
   owner rejected. Rejected.
 - **New workflow input for overrides:** public inputs/logs are

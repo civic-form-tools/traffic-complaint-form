@@ -18,6 +18,11 @@
   caller free text.
 - CODEOWNERS now covers `mcp_server.py`; design and threat model in
   docs/MCP.md.
+- HTTP transport for personal review over a tunnel
+  (TCF_MCP_TRANSPORT=http): bearer-protected (per-session token, 16+
+  characters or the server refuses to start, constant-time compare) and
+  synthetic-only by construction - the dispatch/status tools are not
+  registered, so the exposed instance cannot send, file or touch secrets.
 
 - `CASE_DATA_PRIVATE_KEY` moved out of repository secrets into the protected
   `production` environment; the keypair was rotated in the process (GitHub
