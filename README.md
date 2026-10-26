@@ -23,20 +23,20 @@ private key (also a Secret) can open.
 flowchart LR
     A["workflow_dispatch inputs<br>sample / non-sensitive case JSON<br>or sealed-box encrypted payload"] --> C["fill + render<br>WeasyPrint (RTL Hebrew)"]
     K["repo public key<br>form/keys/case-data-public.key"] -. callers encrypt .-> A
-    S[("GitHub Secrets (environment: filing)<br>complainant identity, PDF password,<br>recipient email, SMTP settings + app password,<br>case-data private key")] --> C
+    S[("GitHub Secrets (environment: production)<br>complainant identity, PDF password,<br>recipient email, SMTP settings + app password,<br>case-data private key")] --> C
     C --> D["pikepdf AES-256 encrypt<br>(mandatory in every mode)"]
     D --> V["verify: password required,<br>exactly 1 page"]
     V --> M["SMTP (STARTTLS, app password)<br>host/port/from all secret-driven"]
     M --> E["recipient inbox"]
 ```
 
-Every run of `Fill and send complaint form` is gated by the **filing**
+Every run of `Fill and send complaint form` is gated by the **production**
 environment, whose required reviewer must approve before any secret is
 exposed to the job.
 
 ## Configuration
 
-Use one **FILING_BUNDLE** JSON secret in the protected **filing** environment,
+Use one **FILING_BUNDLE** JSON secret in the protected **production** environment,
 containing the full identity, strong PDF password, recipient and SMTP settings.
 The exact placeholder template and cutover/removal checklist are in
 [docs/SECRETS.md](docs/SECRETS.md). CASE_DATA_PRIVATE_KEY remains separate.
@@ -50,7 +50,7 @@ ENCRYPT_OUTPUT=false is rejected and there is no ID-password fallback.
 ## Running a test pass
 
 Load the complete bundle directly in GitHub, dispatch **Fill and send
-complaint form** on main using sample data, and approve the filing gate.
+complaint form** on main using sample data, and approve the production gate.
 Use dry_run to build and verify without email. CI uses invented fixtures only.
 Read the [threat model](docs/SECRETS.md#threat-model-and-trust-boundary):
 a bundle prevents partial secret replacement, not malicious approved code.
