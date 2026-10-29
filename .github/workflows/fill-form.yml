@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   fill:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: production # required reviewers gate every run before secrets are exposed
     if: github.ref == 'refs/heads/main'
