@@ -12,9 +12,10 @@ import logging
 import os
 import sys
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 
-from .config import BundleError, FilingConfig
+from .config import BundleError, FilingConfig, FilingOverride, PayloadError
 from .encrypt import encrypt_pdf, verify_encrypted_pdf
 from .fill import render_form, template_base_url
 from .mail import send_encrypted_pdf
@@ -77,8 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.validate_config:
         logger.info("FILING_BUNDLE validation OK (values withheld); no PDF or email")
         return 0
-    complainant = config.complainant
-    pdf_password = config.pdf_password
+    override: FilingOverride | None = None
 
     private_case = bool(args.case_encrypted)
     if args.case_encrypted:
@@ -88,7 +88,14 @@ def main(argv: list[str] | None = None) -> int:
             payload = decrypt_payload(
                 os.environ["CASE_DATA_PRIVATE_KEY"], args.case_encrypted.read_text(encoding="utf-8")
             )
-            case = CaseData.from_dict(json.loads(payload.decode("utf-8")))
+            payload_data = json.loads(payload.decode("utf-8"))
+            if not isinstance(payload_data, Mapping):
+                raise ValueError("payload must be an object")
+            override = FilingOverride.from_payload(payload_data)
+            case = CaseData.from_dict(payload_data)
+        except PayloadError as exc:
+            logger.error("%s", exc)
+            return EXIT_MISSING_CONFIG
         except (CaseDecryptionError, ValueError, json.JSONDecodeError):
             logger.error("Invalid encrypted case data (contents withheld)")
             return EXIT_MISSING_CONFIG
@@ -99,10 +106,28 @@ def main(argv: list[str] | None = None) -> int:
         case = sample_case()
     else:
         try:
-            case = CaseData.from_dict(json.loads(args.case_json.read_text(encoding="utf-8")))
+            payload_data = json.loads(args.case_json.read_text(encoding="utf-8"))
+            if not isinstance(payload_data, Mapping):
+                raise ValueError("payload must be an object")
+            override = FilingOverride.from_payload(payload_data)
+            case = CaseData.from_dict(payload_data)
+        except PayloadError as exc:
+            logger.error("%s", exc)
+            return EXIT_MISSING_CONFIG
         except (ValueError, json.JSONDecodeError):
             logger.error("Invalid case data (contents withheld)")
             return EXIT_MISSING_CONFIG
+
+    if override is not None:
+        # Per-call values from the sealed payload: memory only, this run only.
+        complainant = override.complainant
+        pdf_password = override.pdf_password
+        recipient = override.recipient_email
+        logger.info("Per-call identity override applied (contents stay out of logs)")
+    else:
+        complainant = config.complainant
+        pdf_password = config.pdf_password
+        recipient = config.delivery["recipient_email"]
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     if private_case:
@@ -150,11 +175,12 @@ def main(argv: list[str] | None = None) -> int:
             smtp_username=config.delivery["smtp_username"],
             smtp_password=config.delivery["smtp_app_password"],
             from_address=config.delivery["smtp_from"],
-            recipient=config.delivery["recipient_email"],
+            recipient=recipient,
             attachment_path=outfile,
             vehicle_number=case.vehicle.number,
             offence_date=case.offence.date.strftime("%d/%m/%Y"),
             test_mode=test_mode,
+            per_call_password=override is not None,
         )
     except Exception:
         logger.error("Email delivery failed (details withheld)")

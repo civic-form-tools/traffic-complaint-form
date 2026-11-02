@@ -140,3 +140,110 @@ def test_validation_only_never_renders_or_sends(monkeypatch, caplog):
     with caplog.at_level(logging.INFO):
         assert main(["--validate-config"]) == 0
     assert "validation OK" in caplog.text
+
+
+# --- Payload v2 per-call override (docs/CASE_DATA.md, docs/MCP.md) ---
+
+CASE = {
+    "vehicle_number": "98-765-43",
+    "vehicle_manufacturer": "טויוטה",
+    "vehicle_color": "לבן",
+    "offence_date": "2026-01-15",
+    "offence_time": "14:30",
+    "offence_street": "רחוב הדוגמה",
+    "offence_city": "ירושלים",
+    "offence_description": "הרכב חנה על המדרכה.",
+}
+
+OVERRIDE = {
+    "complainant": {
+        "first_name": "דנה",
+        "last_name": "לוי",
+        "id_number": "000000018",
+        "address": "רחוב המבחן 2",
+        "phone": "050-1111111",
+    },
+    "recipient_email": "caller@example.com",
+    "pdf_password": "invented-per-call-password",
+}
+
+
+def _seal(payload_dict, public_b64):
+    from traffic_complaint_form.crypto import encrypt_payload
+
+    return encrypt_payload(public_b64, json.dumps(payload_dict, ensure_ascii=False).encode("utf-8"))
+
+
+def test_per_call_override_end_to_end(monkeypatch, tmp_path, caplog):
+    set_env(monkeypatch)
+    from traffic_complaint_form.crypto import generate_keypair
+
+    public_b64, private_b64 = generate_keypair()
+    monkeypatch.setenv("CASE_DATA_PRIVATE_KEY", private_b64)
+    enc = tmp_path / "case.enc"
+    enc.write_text(_seal({**CASE, **OVERRIDE}, public_b64))
+    calls = {}
+    monkeypatch.setattr(cli, "send_encrypted_pdf", lambda **kw: calls.update(kw))
+    with caplog.at_level(logging.INFO):
+        assert main(["--case-encrypted", str(enc), "--out-dir", str(tmp_path / "out")]) == 0
+    # Delivery goes to the per-call recipient, flagged per-call for the body variant
+    assert calls["recipient"] == "caller@example.com"
+    assert calls["per_call_password"] is True
+    # The PDF opens with the per-call password, NOT the bundle password
+    pdf = next((tmp_path / "out").glob("*.pdf"))
+    with pikepdf.open(pdf, password="invented-per-call-password") as doc:
+        assert len(doc.pages) == 1
+    with pytest.raises(pikepdf.PasswordError):
+        pikepdf.open(pdf, password=BUNDLE["pdf_password"])
+    # No per-call value and no bundle value ever reaches the log
+    private_values = [
+        "invented-per-call-password",
+        "caller@example.com",
+        "000000018",
+        "050-1111111",
+        BUNDLE["pdf_password"],
+        BUNDLE["delivery"]["recipient_email"],
+        BUNDLE["complainant"]["id_number"],
+    ]
+    for value in private_values:
+        assert value not in caplog.text
+        assert value not in pdf.name
+
+
+def test_partial_override_fails_closed(monkeypatch, tmp_path, caplog):
+    set_env(monkeypatch)
+    from traffic_complaint_form.crypto import generate_keypair
+
+    public_b64, private_b64 = generate_keypair()
+    monkeypatch.setenv("CASE_DATA_PRIVATE_KEY", private_b64)
+    enc = tmp_path / "case.enc"
+    enc.write_text(_seal({**CASE, "recipient_email": "caller@example.com"}, public_b64))
+    monkeypatch.setattr(cli, "send_encrypted_pdf", lambda **k: pytest.fail("must not send"))
+    monkeypatch.setattr(cli, "render_form", lambda *a, **k: pytest.fail("must not render"))
+    with caplog.at_level(logging.INFO):
+        assert main(["--case-encrypted", str(enc), "--out-dir", str(tmp_path / "out")]) == 2
+    assert "partial_override" in caplog.text
+    assert "caller@example.com" not in caplog.text
+    assert not list((tmp_path / "out").glob("*.pdf")) if (tmp_path / "out").exists() else True
+
+
+def test_non_object_payload_fails_closed(monkeypatch, tmp_path, caplog):
+    set_env(monkeypatch)
+    from traffic_complaint_form.crypto import generate_keypair
+
+    public_b64, private_b64 = generate_keypair()
+    monkeypatch.setenv("CASE_DATA_PRIVATE_KEY", private_b64)
+    enc = tmp_path / "case.enc"
+    enc.write_text(_seal(["not", "an", "object"], public_b64))
+    assert main(["--case-encrypted", str(enc), "--out-dir", str(tmp_path / "out"), "--dry-run"]) == 2
+
+
+def test_case_json_also_accepts_override(monkeypatch, tmp_path):
+    set_env(monkeypatch)
+    payload = tmp_path / "case.json"
+    payload.write_text(json.dumps({**CASE, **OVERRIDE}, ensure_ascii=False))
+    calls = {}
+    monkeypatch.setattr(cli, "send_encrypted_pdf", lambda **kw: calls.update(kw))
+    assert main(["--case-json", str(payload), "--out-dir", str(tmp_path / "out")]) == 0
+    assert calls["recipient"] == "caller@example.com"
+    assert calls["per_call_password"] is True

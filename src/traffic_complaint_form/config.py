@@ -42,27 +42,57 @@ class BundleError(ValueError):
 
 ERROR = "FILING_BUNDLE is missing or invalid; see docs/SECRETS.md (values withheld)"
 
+PAYLOAD_ERROR = "per-call override in the case payload is invalid; see docs/CASE_DATA.md (values withheld)"
 
-def _object(value: object, keys: set[str], code: str = "schema") -> dict:
+
+class PayloadError(ValueError):
+    """Only parser-owned diagnostic codes can cross the log boundary."""
+
+    def __init__(self, code: str = "schema"):
+        allowed = {
+            "schema",
+            "partial_override",
+            "complainant",
+            "complainant.first_name",
+            "complainant.last_name",
+            "complainant.id_number",
+            "complainant.address",
+            "complainant.phone",
+            "recipient_email",
+            "pdf_password",
+        }
+        self.code = code if code in allowed else "schema"
+        super().__init__(PAYLOAD_ERROR + "; check: " + self.code)
+
+
+def _object(value: object, keys: set[str], code: str = "schema", error: type[ValueError] = BundleError) -> dict:
     if not isinstance(value, dict) or set(value) != keys:
-        raise BundleError(code)
+        raise error(code)
     return value
 
 
-def _text(value: object, code: str = "schema") -> str:
+def _text(value: object, code: str = "schema", error: type[ValueError] = BundleError) -> str:
     if not isinstance(value, str) or not value.strip() or any(c in value for c in "\r\n\x00"):
-        raise BundleError(code)
+        raise error(code)
     return value
 
 
-def _email(value: object, code: str = "schema") -> str:
-    text = _text(value, code)
+def _email(value: object, code: str = "schema", error: type[ValueError] = BundleError) -> str:
+    text = _text(value, code, error)
+    # Reject surrounding whitespace and any space/control byte outright: the
+    # recipient is the most caller-controlled field and lenient parsing here
+    # only helps smuggling (e.g. a trailing tab).
+    if text != text.strip() or any(ord(ch) < 33 or ord(ch) == 127 for ch in text):
+        raise error(code)
     try:
         address = Address(addr_spec=text)
         if not address.username or not address.domain:
             raise ValueError
-    except ValueError:
-        raise BundleError(code) from None
+    except Exception:  # header parse errors can echo the supplied value - never propagate them
+        raise error(code) from None
+    # Dotted host domain only - no IP literals, no bare hostnames.
+    if "." not in address.domain or "[" in address.domain or "]" in address.domain:
+        raise error(code)
     return text
 
 
@@ -125,3 +155,44 @@ class FilingConfig:
             raise BundleError("json") from None
         except (ValueError, TypeError, KeyError, RecursionError):
             raise BundleError() from None
+
+
+@dataclass(frozen=True, repr=False)
+class FilingOverride:
+    """Per-call identity/delivery values carried inside the sealed case payload.
+
+    Never persisted: applied in memory for a single run, then dropped.
+    All-or-nothing - a partial override fails closed rather than mixing a new
+    recipient with a stored identity (the FILING_BUNDLE atomicity rule).
+    """
+
+    complainant: Complainant
+    recipient_email: str
+    pdf_password: str
+
+    OVERRIDE_KEYS = ("complainant", "recipient_email", "pdf_password")
+
+    @classmethod
+    def from_payload(cls, data: Mapping[str, object]) -> FilingOverride | None:
+        """Return the override, None when no override keys are present."""
+        present = {key for key in cls.OVERRIDE_KEYS if key in data}
+        if not present:
+            return None
+        if present != set(cls.OVERRIDE_KEYS):
+            raise PayloadError("partial_override")
+        person = _object(
+            data["complainant"],
+            {"first_name", "last_name", "id_number", "address", "phone"},
+            "complainant",
+            PayloadError,
+        )
+        person = {k: _text(v, "complainant." + k, PayloadError) for k, v in person.items()}
+        if len(person["id_number"]) != 9 or not person["id_number"].isascii() or not person["id_number"].isdigit():
+            raise PayloadError("complainant.id_number")
+        if not is_valid_israeli_id(person["id_number"]):
+            raise PayloadError("complainant.id_number")
+        password = _text(data["pdf_password"], "pdf_password", PayloadError)
+        if len(password) < 16 or len(password.encode("utf-8")) > 127 or password.strip() == person["id_number"]:
+            raise PayloadError("pdf_password")
+        recipient = _email(data["recipient_email"], "recipient_email", PayloadError)
+        return cls(Complainant(**person), recipient, password)

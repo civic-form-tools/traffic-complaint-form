@@ -130,3 +130,28 @@ def test_subject_is_ascii_only(tmp_path, test_mode):
     body = message.get_body(preferencelist=("plain",)).get_content()
     assert "unscannable" in body  # sets expectations about the gateway warning
     assert "מוצפן" in body
+
+
+def test_per_call_body_variant_mentions_caller_password(tmp_path):
+    attachment = tmp_path / "form.pdf"
+    attachment.write_bytes(b"%PDF-1.7 fake")
+    factory, server = make_smtp()
+    send_encrypted_pdf(
+        smtp_host="smtp.example.com",
+        smtp_port=587,
+        smtp_username="sender@example.com",
+        smtp_password="app-password",
+        from_address="sender@example.com",
+        recipient="dest@example.com",
+        attachment_path=attachment,
+        vehicle_number="12-345-67",
+        offence_date="15/01/2026",
+        per_call_password=True,
+        smtp_factory=factory,
+    )
+    (message,), _ = server.send_message.call_args
+    body = message.get_body(preferencelist=("plain",)).get_content()
+    assert "שבחרת" in body  # the caller's own chosen password, not the bundle's
+    assert "FILING_BUNDLE" not in body
+    # Fixed template: no caller-controlled free text anywhere in the body
+    assert "12-345-67" not in body

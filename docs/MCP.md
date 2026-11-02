@@ -138,13 +138,26 @@ logged, and the docs require the minimal scope.
   - The production environment gate: a human (reihl/reihlinstinct)
     approves **every** run before any secret is exposed. The reviewer sees
     ciphertext, not content - so the gate is a rate/audit control, not a
-    content review. It already is for sealed case data today.
+    content review. It already is for sealed case data today. With per-call
+    `recipient_email` the approver cannot tell a real filing from abuse, so
+    the cap is the only content-blind limit on outbound mail; this holds
+    because dispatch is collaborator-only. If dispatch is ever opened wider
+    (an app, a hosted service), add a checkable signal first: a salted hash
+    of the recipient domain plus a per-day distinct-recipient count in the
+    run log.
   - Blast radius is small by design: the worst outcome is one encrypted
     PDF emailed to one address from the configured sender. Nothing is
     filed with the police; the PDF is useless without the password the
     recipient chose.
 - Token theft: the dispatch token is single-repo, Actions-only; every use
   still waits on the human gate.
+- Run correlation: the dispatcher adds a random non-secret
+  `dispatch_nonce` input, which lands in the run name
+  (`run-name: fill-form <nonce>`); `_find_run` matches on it, so a
+  concurrent dispatch by someone else can never be reported as ours.
+- The sealed-box public key is fetched from the repo's default branch at
+  call time; anyone able to swap it already controls the workflow. To pin
+  it, set `TCF_PUBLIC_KEY_B64` at install time.
 
 ### 3. Abuse / spam submissions
 
@@ -152,10 +165,15 @@ logged, and the docs require the minimal scope.
   arbitrary recipients. Controls:
   1. Static subject/body templates (no caller free text) - above.
   2. Per-run human gate - above.
-  3. **Per-day dispatch cap** in the workflow (proposed default 10,
+  3. **Per-day dispatch cap** in the workflow (default 10,
      `vars.MCP_DAILY_CAP`), fail closed. Implementation: count today's
-     `fill-form` runs via the API (needs `actions: read` added to the
-     workflow permissions) before the filling step.
+     `fill-form` runs via the API (the workflow has `actions: read`) before
+     the filling step. Two known properties (review, 2026-10-26): a
+     **re-run** reuses the run id, so it sends again without counting
+     toward the cap - impact low, since a re-run still needs collaborator
+     rights and a fresh gate approval; and rejected/cancelled runs **do**
+     count, so a collaborator can spend the day's cap and block filings -
+     fail closed, the safe direction.
   4. Audit: GitHub's deployment/review history already records who
      approved which run; we add nothing personal to issues or logs.
   5. The body template tells the recipient what this is and where to
