@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Dedicated synthetic SMTP exercise (#64): invalid fictional identity, strict
+  testing-only configuration, final-envelope recipient lock, no artifacts.
+
 - fill-batch workflow fixes (#55): post-run verification checks every output
   archive. Artifact upload removed before release: sample cases still use
   the complainant identity in the bundle and are not wholly synthetic.

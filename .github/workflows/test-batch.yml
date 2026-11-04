@@ -1,0 +1,46 @@
+name: Synthetic batch SMTP exercise
+on:
+  workflow_dispatch:
+    inputs:
+      archive_format:
+        type: choice
+        options: [zip-legacy, zip-aes]
+        default: zip-legacy
+      split:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: synthetic-batch
+  cancel-in-progress: false
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: testing
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: System libraries for WeasyPrint and Hebrew fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
+            fonts-noto-core fonts-dejavu
+
+      - run: pip install -e .
+
+      - name: Synthetic fill verify and SMTP
+        run: python -m traffic_complaint_form.synthetic --archive-format "$FORMAT" ${SPLIT:+--split}
+        env:
+          TEST_FILING_BUNDLE: ${{ secrets.TEST_FILING_BUNDLE }}
+          TEST_APPROVED_RECIPIENT: ${{ secrets.TEST_APPROVED_RECIPIENT }}
+          FORMAT: ${{ inputs.archive_format }}
+          SPLIT: ${{ inputs.split && '1' || '' }}
