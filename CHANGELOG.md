@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- FILING_BUNDLE version 2: optional batch-mode fields `archive_password`
+  (required in v2) and `archive_format` (`zip-legacy` default, `zip-aes`
+  optional) for the upcoming multi-form archive delivery. Version 1 bundles
+  remain valid for single-form runs; batch runs fail closed on a v1 bundle.
+  The archive-format choice never affects single mode's locked PDF. (#43)
+
 - `CASE_DATA_PRIVATE_KEY` moved out of repository secrets into the protected
   `production` environment; the keypair was rotated in the process (GitHub
   secrets are unreadable, and no outside copy existed). Payloads sealed with
