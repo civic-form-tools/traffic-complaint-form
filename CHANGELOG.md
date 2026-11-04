@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- fill-batch workflow fixes (#55): post-run verification checks every output
+  archive. Artifact upload removed before release: sample cases still use
+  the complainant identity in the bundle and are not wholly synthetic.
+
+- Batch size cap with automatic splitting (#51): each emailed archive is
+  capped at `max_archive_mb` (FILING_BUNDLE v2, default 10 MB measured on the
+  ZIP file); over-cap batches are packed greedily in payload order into
+  multiple verified archives and "part K of M" emails sharing one password.
+  A single case PDF over the cap fails clearly before anything is mailed.
+
 - Batch mode (#42): the new `Fill and send complaint forms (batch)` workflow
   fills N cases from one sealed-box `{"cases": [...]}` payload and emails ONE
   encrypted ZIP of open PDFs (members `complaint-NN.pdf`). The archive is

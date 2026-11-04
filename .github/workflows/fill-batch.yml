@@ -78,18 +78,20 @@ jobs:
         run: |
           python3 - <<'PY'
           import glob, os
-          files = glob.glob("out/*.zip")
-          assert len(files) == 1, f"expected exactly one output archive, found {files}"
-          size = os.path.getsize(files[0])
-          assert size > 5_000, f"output suspiciously small: {size}"
+          files = sorted(glob.glob("out/*.zip"))
+          assert files, "no output archive found"
           import pyzipper
-          with pyzipper.AESZipFile(files[0]) as z:
-              names = z.namelist()
-              assert names, "archive has no members"
-              try:
-                  z.read(names[0])
-                  raise SystemExit("archive opens WITHOUT a password - refusing to finish green")
-              except RuntimeError:
-                  pass
-          print(f"verification OK: one archive, {len(names)} members, {size} bytes, password required")
+          for path in files:
+              size = os.path.getsize(path)
+              assert size > 5_000, f"output suspiciously small: {path} ({size})"
+              with pyzipper.AESZipFile(path) as z:
+                  names = z.namelist()
+                  assert names, f"{path} has no members"
+                  try:
+                      z.read(names[0])
+                      raise SystemExit(f"{path} opens WITHOUT a password - refusing to finish green")
+                  except RuntimeError:
+                      pass
+              print(f"verified {os.path.basename(path)}: {len(names)} members, {size} bytes, password required")
+          print(f"verification OK: {len(files)} archive(s)")
           PY

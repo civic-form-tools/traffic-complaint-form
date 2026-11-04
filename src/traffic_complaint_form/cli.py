@@ -21,7 +21,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from .archive import create_archive, verify_archive
+from .archive import ArchiveVerificationError, OversizedMemberError, create_archive, pack_members, verify_archive
 from .config import BundleError, FilingConfig
 from .encrypt import encrypt_pdf, verify_encrypted_pdf
 from .fill import render_form, template_base_url
@@ -210,7 +210,6 @@ def _run_batch(args: argparse.Namespace, config: FilingConfig, test_mode: bool) 
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     today = datetime.now(JERUSALEM_TZ).date()
-    outfile = args.out_dir / f"traffic-complaints-batch-{today.isoformat()}-{digest}.zip"
 
     with tempfile.TemporaryDirectory(prefix="tcf-batch-") as tmp:
         members: list[tuple[str, Path]] = []
@@ -232,36 +231,73 @@ def _run_batch(args: argparse.Namespace, config: FilingConfig, test_mode: bool) 
                 )
                 return EXIT_OVERFLOW
             members.append((f"complaint-{index:02d}.pdf", member_path))
+        cap_bytes = config.max_archive_mb * 1024 * 1024
         try:
-            create_archive(members, outfile, password=config.archive_password, fmt=config.archive_format)
-            verify_archive(outfile, password=config.archive_password, expected_members=len(members))
-        except Exception:
-            logger.error("Archive creation or verification failed (details withheld)")
-            outfile.unlink(missing_ok=True)
-            return EXIT_FAILED
-        logger.info("Encrypted archive verified (%s cases, %s bytes)", len(members), outfile.stat().st_size)
+            groups = pack_members(
+                members, max_bytes=cap_bytes, password=config.archive_password, fmt=config.archive_format
+            )
+        except OversizedMemberError as exc:
+            # Message carries a neutral member name and byte counts only.
+            logger.error("%s - a single document cannot be split; shrink the case's PDF", exc)
+            return EXIT_OVERFLOW
+        archives: list[Path] = []
+        total = len(groups)
+        for part, group in enumerate(groups, start=1):
+            suffix = f"-part{part}of{total}" if total > 1 else ""
+            out_path = args.out_dir / f"traffic-complaints-batch-{today.isoformat()}-{digest}{suffix}.zip"
+            try:
+                create_archive(group, out_path, password=config.archive_password, fmt=config.archive_format)
+                verify_archive(
+                    out_path, password=config.archive_password, expected_members=len(group), max_bytes=cap_bytes
+                )
+            except ArchiveVerificationError as exc:
+                # Verification messages carry counts, sizes and neutral names only.
+                logger.error("Archive verification failed: %s", exc)
+                for path in archives + [out_path]:
+                    path.unlink(missing_ok=True)
+                return EXIT_FAILED
+            except Exception:
+                logger.error("Archive creation failed (details withheld)")
+                for path in archives + [out_path]:
+                    path.unlink(missing_ok=True)
+                return EXIT_FAILED
+            archives.append(out_path)
+            logger.info(
+                "Encrypted archive part %s/%s verified (%s cases, %s bytes)",
+                part,
+                total,
+                len(group),
+                out_path.stat().st_size,
+            )
 
     if args.dry_run:
-        logger.info("Dry run: email skipped. Encrypted archive kept at %s", outfile.name)
+        logger.info("Dry run: email skipped. %s encrypted archive(s) kept in %s", len(archives), args.out_dir)
         return 0
 
-    try:
-        send_encrypted_archive(
-            smtp_host=config.delivery["smtp_host"],
-            smtp_port=config.delivery["smtp_port"],
-            smtp_username=config.delivery["smtp_username"],
-            smtp_password=config.delivery["smtp_app_password"],
-            from_address=config.delivery["smtp_from"],
-            recipient=config.delivery["recipient_email"],
-            archive_path=outfile,
-            case_count=len(batch.cases),
-            batch_date=today.strftime("%d/%m/%Y"),
-            test_mode=test_mode,
-        )
-    except Exception:
-        logger.error("Email delivery failed (details withheld)")
-        return EXIT_FAILED
-    logger.info("Done: encrypted archive delivered to the configured recipient (test_mode=%s)", test_mode)
+    for part, archive_path in enumerate(archives, start=1):
+        try:
+            send_encrypted_archive(
+                smtp_host=config.delivery["smtp_host"],
+                smtp_port=config.delivery["smtp_port"],
+                smtp_username=config.delivery["smtp_username"],
+                smtp_password=config.delivery["smtp_app_password"],
+                from_address=config.delivery["smtp_from"],
+                recipient=config.delivery["recipient_email"],
+                archive_path=archive_path,
+                case_count=len(batch.cases),
+                batch_date=today.strftime("%d/%m/%Y"),
+                test_mode=test_mode,
+                part=part,
+                total_parts=len(archives),
+            )
+        except Exception:
+            logger.error("Email delivery failed for part %s/%s (details withheld)", part, len(archives))
+            return EXIT_FAILED
+    logger.info(
+        "Done: %s encrypted archive(s) delivered to the configured recipient (test_mode=%s)",
+        len(archives),
+        test_mode,
+    )
     return 0
 
 

@@ -52,6 +52,10 @@ class ArchiveVerificationError(ArchiveError):
     """A finished archive failed its post-creation checks."""
 
 
+class OversizedMemberError(ArchiveError):
+    """One member alone exceeds the archive size cap and cannot be split."""
+
+
 # --- ZipCrypto (traditional PKWARE) writer ---------------------------------
 
 
@@ -110,24 +114,42 @@ def _deflate(data: bytes) -> tuple[bytes, int]:
     return compressed, METHOD_DEFLATE
 
 
-def _write_zipcrypto_zip(members: list[tuple[str, Path]], out_path: Path, password: bytes) -> None:
+def _write_zipcrypto_zip(members: list[tuple[str, Path]], fp, password: bytes) -> None:
     dos_time, dos_date = _dos_datetime(time.localtime())
     central = b""
     offset = 0
-    with out_path.open("wb") as fh:
-        for arcname, path in members:
-            name = arcname.encode("utf-8")
-            plaintext = path.read_bytes()
-            crc = binascii.crc32(plaintext)
-            compressed, method = _deflate(plaintext)
-            cipher = _ZipCrypto(password)
-            # 12-byte encryption header: 11 random bytes + CRC high byte
-            # (the local header carries the CRC; no data descriptor used).
-            header = os.urandom(11) + bytes(((crc >> 24) & 0xFF,))
-            payload = cipher.encrypt(header) + cipher.encrypt(compressed)
-            local = struct.pack(
-                "<IHHHHHIIIHH",
-                LOCAL_HEADER_SIG,
+    for arcname, path in members:
+        name = arcname.encode("utf-8")
+        plaintext = path.read_bytes()
+        crc = binascii.crc32(plaintext)
+        compressed, method = _deflate(plaintext)
+        cipher = _ZipCrypto(password)
+        # 12-byte encryption header: 11 random bytes + CRC high byte
+        # (the local header carries the CRC; no data descriptor used).
+        header = os.urandom(11) + bytes(((crc >> 24) & 0xFF,))
+        payload = cipher.encrypt(header) + cipher.encrypt(compressed)
+        local = struct.pack(
+            "<IHHHHHIIIHH",
+            LOCAL_HEADER_SIG,
+            20,
+            FLAG_ENCRYPTED,
+            method,
+            dos_time,
+            dos_date,
+            crc,
+            len(payload),
+            len(plaintext),
+            len(name),
+            0,
+        )
+        fp.write(local)
+        fp.write(name)
+        fp.write(payload)
+        central += (
+            struct.pack(
+                "<IHHHHHHIIIHHHHHII",
+                CENTRAL_HEADER_SIG,
+                20,
                 20,
                 FLAG_ENCRYPTED,
                 method,
@@ -138,48 +160,29 @@ def _write_zipcrypto_zip(members: list[tuple[str, Path]], out_path: Path, passwo
                 len(plaintext),
                 len(name),
                 0,
-            )
-            fh.write(local)
-            fh.write(name)
-            fh.write(payload)
-            central += (
-                struct.pack(
-                    "<IHHHHHHIIIHHHHHII",
-                    CENTRAL_HEADER_SIG,
-                    20,
-                    20,
-                    FLAG_ENCRYPTED,
-                    method,
-                    dos_time,
-                    dos_date,
-                    crc,
-                    len(payload),
-                    len(plaintext),
-                    len(name),
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    offset,
-                )
-                + name
-            )
-            offset += len(local) + len(name) + len(payload)
-        fh.write(central)
-        fh.write(
-            struct.pack(
-                "<IHHHHIIH",
-                END_OF_CENTRAL_SIG,
                 0,
                 0,
-                len(members),
-                len(members),
-                len(central),
+                0,
+                0,
                 offset,
-                0,
             )
+            + name
         )
+        offset += len(local) + len(name) + len(payload)
+    fp.write(central)
+    fp.write(
+        struct.pack(
+            "<IHHHHIIH",
+            END_OF_CENTRAL_SIG,
+            0,
+            0,
+            len(members),
+            len(members),
+            len(central),
+            offset,
+            0,
+        )
+    )
 
 
 def _write_aes_zip(members: list[tuple[str, Path]], out_path: Path, password: bytes) -> None:
@@ -196,8 +199,7 @@ _WRITERS = {
 }
 
 
-def create_archive(members: list[tuple[str, Path]], out_path: Path, *, password: str, fmt: str) -> None:
-    """Write members into one password-encrypted archive at out_path."""
+def _check_members(members: list[tuple[str, Path]], password: str, fmt: str) -> None:
     if fmt not in ARCHIVE_FORMATS:
         raise ArchiveError("unknown archive format (check archive_format)")
     if not members:
@@ -207,7 +209,48 @@ def create_archive(members: list[tuple[str, Path]], out_path: Path, *, password:
     names = [arcname for arcname, _ in members]
     if len(set(names)) != len(names) or any("/" in n or "\\" in n or n.startswith(".") for n in names):
         raise ArchiveError("invalid member names")
-    _WRITERS[fmt](members, out_path, password.encode("utf-8"))
+
+
+def _archive_bytes(members: list[tuple[str, Path]], *, password: str, fmt: str) -> bytes:
+    buffer = io.BytesIO()
+    _WRITERS[fmt](members, buffer, password.encode("utf-8"))
+    return buffer.getvalue()
+
+
+def create_archive(members: list[tuple[str, Path]], out_path: Path, *, password: str, fmt: str) -> None:
+    """Write members into one password-encrypted archive at out_path."""
+    _check_members(members, password, fmt)
+    with out_path.open("wb") as fp:
+        _WRITERS[fmt](members, fp, password.encode("utf-8"))
+
+
+def pack_members(
+    members: list[tuple[str, Path]], *, max_bytes: int, password: str, fmt: str
+) -> list[list[tuple[str, Path]]]:
+    """Greedy deterministic grouping under the email size cap (user decision 2026-11-04).
+
+    Members keep payload order; the trial archive is REALLY built in memory
+    with the chosen backend, so the cap is measured on the exact bytes that
+    will be sent. One member alone over the cap raises OversizedMemberError
+    (a single document cannot be split) and nothing is produced.
+    """
+    _check_members(members, password, fmt)
+    groups: list[list[tuple[str, Path]]] = []
+    current: list[tuple[str, Path]] = []
+    for member in members:
+        trial = [*current, member]
+        if len(_archive_bytes(trial, password=password, fmt=fmt)) <= max_bytes:
+            current = trial
+            continue
+        if not current:
+            raise OversizedMemberError(f"member {member[0]} alone is over the {max_bytes}-byte archive cap")
+        groups.append(current)
+        current = [member]
+        if len(_archive_bytes(current, password=password, fmt=fmt)) > max_bytes:
+            raise OversizedMemberError(f"member {member[0]} alone is over the {max_bytes}-byte archive cap")
+    if current:
+        groups.append(current)
+    return groups
 
 
 def _open_member(archive: pyzipper.AESZipFile, name: str, password: bytes | None) -> bytes:
@@ -216,13 +259,17 @@ def _open_member(archive: pyzipper.AESZipFile, name: str, password: bytes | None
     return archive.read(name)
 
 
-def verify_archive(path: Path, *, password: str, expected_members: int) -> None:
+def verify_archive(path: Path, *, password: str, expected_members: int, max_bytes: int | None = None) -> None:
     """Confirm the archive is unreadable without its password and well-formed with it.
 
     Every member must be an open (PDF-level unencrypted), well-formed PDF of
     1..MAX_MEMBER_PAGES pages: batch PDFs are open BY DESIGN, so a member that
     demands a password means the single-mode lock leaked into the batch path.
     """
+    if max_bytes is not None:
+        size = path.stat().st_size
+        if size > max_bytes:
+            raise ArchiveVerificationError(f"{path.name} is {size} bytes, over the {max_bytes}-byte email cap")
     try:
         with pyzipper.AESZipFile(str(path)) as archive:
             names = archive.namelist()

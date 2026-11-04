@@ -170,9 +170,18 @@ Key decisions:
   (pyzipper) with a one-field secret edit once devices support it. The
   ZipCrypto writer is pure Python (pyzipper does not write it); interop is
   pinned by tests against pyzipper, stdlib zipfile and Info-ZIP.
-- **Fail-fast**: any invalid case, render failure, page overflow or archive
-  failure aborts before any email; no partial archive is mailed. All cases
-  are validated before rendering; diagnostics cite case index only.
+- **Fail-fast on content**: any invalid case, render failure, page overflow
+  or archive failure aborts before any email; no partial archive is mailed.
+  All cases are validated before rendering; diagnostics cite case index only.
+- **Size cap with splitting** (user decision 2026-11-04, #51): the archive
+  travels by email, so each archive is capped at `max_archive_mb` (default
+  10, measured on the ZIP file; base64 adds ~33% on the wire, staying well
+  under Gmail's 25 MB MIME limit). Over-cap batches are packed greedily in
+  payload order into multiple archives/emails (trial archives built in
+  memory, so the cap is measured on the exact bytes sent); every part is
+  encrypted with the same `archive_password`, verified, and emailed with a
+  "part K of M" subject. A single case whose PDF alone exceeds the cap fails
+  the whole run clearly (exit 3) and nothing is mailed - no silent drops.
 - **Payload**: one sealed-box JSON `{"cases": [...]}` (each case = the
   single-mode schema), capped at 20 cases so the ciphertext fits the
   dispatch input. Larger batches need the future repository_dispatch

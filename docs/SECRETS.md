@@ -4,6 +4,9 @@ Create **FILING_BUNDLE** under Settings -> Environments -> **production** ->
 Environment secrets. Do not create a repository-level copy. The parser
 requires the complete version-1 JSON object, including delivery settings,
 even for dry runs. There is no fallback to the old individual secrets.
+No archives are uploaded as workflow artifacts. Sample cases still use the
+complainant identity in FILING_BUNDLE, so sample mode does not make a
+production-bundle run wholly synthetic.
 
 Replace every placeholder locally or directly in GitHub. Never put real
 values in an issue, PR, repository file, command argument or chat.
@@ -52,6 +55,13 @@ single-form runs; batch runs require version 2 and fail closed without it.
 - `archive_format` (optional, default `"zip-legacy"`): how the batch archive
   is encrypted. Applies ONLY to batch mode; single mode always delivers an
   individually locked PDF.
+- `max_archive_mb` (optional, default `10`): the email size cap per batch
+  archive, measured on the ZIP file itself. Base64 encoding adds ~33% on the
+  wire, so the default 10 MB archive is ~13.3 MB as sent - well under Gmail's
+  25 MB MIME limit. Allowed range 1-24. Batches that exceed the cap are
+  SPLIT into multiple archives/emails automatically (same password for all
+  parts); a single case whose PDF alone exceeds the cap fails the run with a
+  clear size-only message, and nothing is mailed.
 
 | `archive_format` | Crypto | Opens natively on iPhone/Mac | Filenames hidden |
 | --- | --- | --- | --- |

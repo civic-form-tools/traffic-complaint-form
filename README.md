@@ -52,7 +52,9 @@ ENCRYPT_OUTPUT=false is rejected and there is no ID-password fallback.
 
 Load the complete bundle directly in GitHub, dispatch **Fill and send
 complaint form** on main using sample data, and approve the production gate.
-Use dry_run to build and verify without email. CI uses invented fixtures only.
+Use dry_run to build and verify without email. No archives are uploaded as
+artifacts: sample cases still use the complainant identity from the bundle.
+CI uses invented fixtures only.
 Read the [threat model](docs/SECRETS.md#threat-model-and-trust-boundary):
 a bundle prevents partial secret replacement, not malicious approved code.
 
