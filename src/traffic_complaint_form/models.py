@@ -73,7 +73,7 @@ class TriState(Enum):
             return cls.NO
         if normalized in {"", "unknown", "לא ידוע"}:
             return cls.UNKNOWN
-        raise ValueError(f"invalid yes/no value: {value!r}")
+        raise ValueError("invalid yes/no value (content withheld)")
 
 
 def is_valid_israeli_id(id_number: str) -> bool:
@@ -337,3 +337,41 @@ class CaseData:
             ),
             incidents=tuple(incidents) if len(incidents) > 1 else (),
         )
+
+
+MAX_BATCH_CASES = 20
+
+
+@dataclass(frozen=True, repr=False)
+class CaseBatch:
+    """Several complaints filled in one run and delivered as ONE encrypted archive.
+
+    Diagnostics identify cases by 1-based index only - never by plate or any
+    other case value, because public workflow logs are world-readable.
+    """
+
+    cases: tuple[CaseData, ...]
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> CaseBatch:
+        if not isinstance(data, Mapping) or set(data) != {"cases"}:
+            raise ValueError("batch payload must be an object with exactly one key: cases")
+        raw = data["cases"]
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("cases must be a non-empty list")
+        if len(raw) > MAX_BATCH_CASES:
+            raise ValueError(f"batch holds {len(raw)} cases, the limit is {MAX_BATCH_CASES}")
+        problems: list[str] = []
+        cases: list[CaseData] = []
+        for index, item in enumerate(raw, start=1):
+            if not isinstance(item, Mapping):
+                problems.append(f"case #{index}: must be an object")
+                continue
+            try:
+                cases.append(CaseData.from_dict(item))
+            except ValueError as exc:
+                for problem in str(exc).split("; "):
+                    problems.append(f"case #{index}: {problem}")
+        if problems:
+            raise ValueError("; ".join(problems))
+        return cls(tuple(cases))
