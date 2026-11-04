@@ -8,8 +8,9 @@ import pikepdf
 import weasyprint
 
 
-def html_to_pdf(html_text: str, *, base_url: str, out_path: Path) -> int:
+def html_to_pdf(html_text: str, *, base_url: str, out_path: Path, url_fetcher=None) -> int:
     """Write the PDF to out_path and return the number of pages."""
-    weasyprint.HTML(string=html_text, base_url=base_url).write_pdf(str(out_path))
+    options = {"url_fetcher": url_fetcher} if url_fetcher is not None else {}
+    weasyprint.HTML(string=html_text, base_url=base_url, **options).write_pdf(str(out_path))
     with pikepdf.open(str(out_path)) as pdf:
         return len(pdf.pages)

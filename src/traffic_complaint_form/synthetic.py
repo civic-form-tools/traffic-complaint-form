@@ -11,6 +11,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import pikepdf
 
@@ -114,6 +115,26 @@ class LockedSMTP:
         return self.server.send_message(message, to_addrs=[self.approved])
 
 
+class TemplateFetcher:
+    """Read packaged form assets only. No proxy discovery or arbitrary file/network access."""
+
+    _fail_on_errors = False
+
+    def __call__(self, url):
+        from weasyprint import urls
+
+        parsed = urlparse(url)
+        root = Path(template_base_url()).resolve()
+        path = Path(unquote(parsed.path)).resolve()
+        if parsed.scheme != "file" or path.parent != root / "assets" or path.suffix != ".png":
+            raise SyntheticError("Synthetic resource not allowed")
+        data = path.read_bytes()
+        response = getattr(urls, "URLFetcherResponse", None)
+        if response is not None:
+            return response(url, data, {"Content-Type": "image/png"})
+        return {"string": data, "mime_type": "image/png"}
+
+
 @contextmanager
 def build_archives(password, *, archive_format, split):
     """Builder receives test encryption material, never SMTP settings."""
@@ -125,7 +146,12 @@ def build_archives(password, *, archive_format, split):
         members = []
         for index in range(1, 5):
             path = root / f"complaint-{index:02d}.pdf"
-            pages = html_to_pdf(render_form(case, person, test_mode=True), base_url=template_base_url(), out_path=path)
+            pages = html_to_pdf(
+                render_form(case, person, test_mode=True),
+                base_url=template_base_url(),
+                out_path=path,
+                url_fetcher=TemplateFetcher(),
+            )
             if pages != 1:
                 raise SyntheticError("Synthetic PDF page count mismatch")
             if split:

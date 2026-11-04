@@ -123,7 +123,7 @@ def test_full_offline_path(tmp_path, monkeypatch, fmt, split):
 
     SMTP.messages = []
 
-    def render(html, *, base_url, out_path):
+    def render(html, *, base_url, out_path, url_fetcher=None):
         assert "TEST-NOT-A-VALID-ID" in html
         pdf = pikepdf.new()
         pdf.add_blank_page()
@@ -207,7 +207,7 @@ def test_main_success_without_network(monkeypatch, capsys):
 
 
 def test_cleanup_when_smtp_fails(tmp_path, monkeypatch):
-    def render(html, *, base_url, out_path):
+    def render(html, *, base_url, out_path, url_fetcher=None):
         pdf = pikepdf.new()
         pdf.add_blank_page()
         pdf.save(out_path)
@@ -291,7 +291,7 @@ def test_complete_noninterference(tmp_path, monkeypatch, caplog, capsys, fmt, sp
     def guard_file(original):
         def wrapped(file, *args, **kwargs):
             if isinstance(file, (str, bytes, os.PathLike)):
-                assert Path(file).absolute() != trap, "production file read"
+                assert Path(os.fsdecode(file)).absolute() != trap, "production file read"
             return original(file, *args, **kwargs)
 
         return wrapped
@@ -315,8 +315,21 @@ def test_complete_noninterference(tmp_path, monkeypatch, caplog, capsys, fmt, sp
 
     SMTP.messages = []
     monkeypatch.setattr(smtplib, "SMTP", CapturedSMTP)
+    failures = []
+    original_run = s.run
+
+    def recorded_run(*args, **kwargs):
+        try:
+            return original_run(*args, **kwargs)
+        except Exception:
+            import traceback
+
+            failures.append(traceback.format_exc())  # invented offline fixtures only
+            raise
+
+    monkeypatch.setattr(s, "run", recorded_run)
     args = ["--archive-format", fmt] + (["--split"] if split else [])
-    assert s.main(args) == (1 if fail_send else 0)
+    assert s.main(args) == (1 if fail_send else 0), failures
     assert not list(scratch.iterdir())
     assert len(SMTP.messages) == (1 if fail_send else (2 if split else 1))
     observed = caplog.text + str(capsys.readouterr())
@@ -422,3 +435,24 @@ def test_builder_never_receives_delivery_config(monkeypatch):
     monkeypatch.setattr(s, "deliver_archives", sender)
     s.run(config(), "owner@example.invalid", archive_format="zip-aes", split=False, smtp_factory=SMTP)
     assert seen == ["build", "send"]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.invalid/x",
+        "file:///tmp/production.json",
+        "file:///etc/passwd",
+        "file:///tmp/assets/../production.json",
+    ],
+)
+def test_template_fetcher_rejects_external_resources(url):
+    with pytest.raises(s.SyntheticError, match="not allowed"):
+        s.TemplateFetcher()(url)
+
+
+def test_template_fetcher_packaged_asset():
+    asset = next((Path(s.template_base_url()) / "assets").glob("*.png"))
+    response = s.TemplateFetcher()(asset.as_uri())
+    assert response.read().startswith(b"\x89PNG")
+    response.close()
