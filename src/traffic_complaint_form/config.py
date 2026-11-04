@@ -9,6 +9,11 @@ from email.headerregistry import Address
 
 from .models import Complainant, is_valid_israeli_id
 
+# Batch-mode archive formats (see docs/DESIGN.md). The choice applies only to
+# batch runs; single mode always delivers an individually locked PDF.
+ARCHIVE_FORMATS = ("zip-legacy", "zip-aes")
+DEFAULT_ARCHIVE_FORMAT = "zip-legacy"
+
 
 class BundleError(ValueError):
     """Only parser-owned diagnostic codes can cross the log boundary."""
@@ -24,6 +29,8 @@ class BundleError(ValueError):
             "complainant",
             "complainant.id_number",
             "pdf_password",
+            "archive_password",
+            "archive_format",
             "delivery",
             "delivery.recipient_email",
             "delivery.smtp_from",
@@ -75,26 +82,49 @@ def _unique(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
+def _strong_password(value: object, code: str, *, id_number: str, other: str | None = None) -> str:
+    """Shared rules for pdf_password and archive_password."""
+    password = _text(value, code)
+    if (
+        len(password) < 16
+        or len(password.encode("utf-8")) > 127
+        or password.strip() == id_number
+        or (other is not None and password == other)
+    ):
+        raise BundleError(code)
+    return password
+
+
 @dataclass(frozen=True, repr=False)
 class FilingConfig:
     complainant: Complainant
     pdf_password: str
     delivery: dict
+    # Batch mode only. None for a version-1 bundle (single mode keeps working);
+    # batch runs must call from_env(require_archive=True) and fail closed.
+    archive_password: str | None = None
+    archive_format: str = DEFAULT_ARCHIVE_FORMAT
 
     @classmethod
-    def from_env(cls, environ: Mapping[str, str]) -> FilingConfig:
+    def from_env(cls, environ: Mapping[str, str], *, require_archive: bool = False) -> FilingConfig:
         """No separate-secret fallback, including sample/test/dry runs."""
         try:
             raw = environ.get("FILING_BUNDLE", "")
             if not raw or len(raw.encode()) > 48 * 1024:
                 raise BundleError("missing_or_oversized")
-            data = _object(
-                json.loads(raw, object_pairs_hook=_unique),
-                {"version", "complainant", "pdf_password", "delivery"},
-                "root",
-            )
-            if type(data["version"]) is not int or data["version"] != 1:
+            data = json.loads(raw, object_pairs_hook=_unique)
+            if not isinstance(data, dict):
+                raise BundleError("root")
+            version = data.get("version")
+            if type(version) is not int or version not in (1, 2):
                 raise BundleError("version")
+            base_keys = {"version", "complainant", "pdf_password", "delivery"}
+            expected = set(base_keys)
+            if version == 2:
+                expected |= {"archive_password", "archive_format"}
+            keys = set(data)
+            if not expected >= keys or not base_keys <= keys or (version == 2 and "archive_password" not in keys):
+                raise BundleError("root")
             person = _object(
                 data["complainant"], {"first_name", "last_name", "id_number", "address", "phone"}, "complainant"
             )
@@ -103,9 +133,19 @@ class FilingConfig:
                 raise BundleError("complainant.id_number")
             if not is_valid_israeli_id(person["id_number"]):
                 raise BundleError("complainant.id_number")
-            password = _text(data["pdf_password"], "pdf_password")
-            if len(password) < 16 or len(password.encode("utf-8")) > 127 or password.strip() == person["id_number"]:
-                raise BundleError("pdf_password")
+            password = _strong_password(data["pdf_password"], "pdf_password", id_number=person["id_number"])
+            archive_password = None
+            archive_format = DEFAULT_ARCHIVE_FORMAT
+            if version == 2:
+                archive_password = _strong_password(
+                    data["archive_password"], "archive_password", id_number=person["id_number"], other=password
+                )
+                if "archive_format" in data:
+                    archive_format = _text(data["archive_format"], "archive_format")
+                    if archive_format not in ARCHIVE_FORMATS:
+                        raise BundleError("archive_format")
+            if require_archive and archive_password is None:
+                raise BundleError("archive_password")
             delivery = _object(
                 data["delivery"],
                 {"recipient_email", "smtp_host", "smtp_port", "smtp_username", "smtp_app_password", "smtp_from"},
@@ -118,7 +158,7 @@ class FilingConfig:
                 delivery[key] = _text(delivery[key], "delivery." + key)
             if type(delivery["smtp_port"]) is not int or not 1 <= delivery["smtp_port"] <= 65535:
                 raise BundleError("delivery.smtp_port")
-            return cls(Complainant(**person), password, delivery)
+            return cls(Complainant(**person), password, delivery, archive_password, archive_format)
         except BundleError:
             raise
         except json.JSONDecodeError:

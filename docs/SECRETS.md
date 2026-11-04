@@ -30,6 +30,45 @@ values in an issue, PR, repository file, command argument or chat.
 }
 ```
 
+## Version 2: batch archive fields
+
+Batch mode (filling several forms into one encrypted archive, see
+docs/DESIGN.md) needs two extra fields. Version 1 bundles stay valid for
+single-form runs; batch runs require version 2 and fail closed without it.
+
+```json
+{
+  "version": 2,
+  "complainant": { "...": "as in version 1" },
+  "pdf_password": "AS_IN_VERSION_1",
+  "archive_password": "YOUR_LONG_RANDOM_ARCHIVE_PASSWORD",
+  "archive_format": "zip-legacy",
+  "delivery": { "...": "as in version 1" }
+}
+```
+
+- `archive_password` (required in v2): at least 16 characters, at most 127
+  UTF-8 bytes, and different from both the complainant ID and `pdf_password`.
+- `archive_format` (optional, default `"zip-legacy"`): how the batch archive
+  is encrypted. Applies ONLY to batch mode; single mode always delivers an
+  individually locked PDF.
+
+| `archive_format` | Crypto | Opens natively on iPhone/Mac | Filenames hidden |
+| --- | --- | --- | --- |
+| `"zip-legacy"` (default) | ZipCrypto - WEAK, see below | yes | no (neutral names used) |
+| `"zip-aes"` | AES-256 (WinZip) | no (device test 2026-11-04) | no (neutral names used) |
+
+ZipCrypto is legacy, breakable encryption: the filled forms share template
+boilerplate, so an attacker holding the archive has known plaintext for the
+classic Biham-Kocher attack. It is the default only because the owner's
+devices open it natively. Use a long random `archive_password` and switch to
+`"zip-aes"` once the receiving devices support it - a one-field edit of this
+secret, no code change. Batch archive member names are always neutral
+(`complaint-NN.pdf`) because no ZIP format encrypts filenames.
+
+Cutover from v1: add the two fields and change `"version"` to `2` in the same
+FILING_BUNDLE secret. Nothing else changes; single-form runs are unaffected.
+
 All fields are required. Unknown keys, duplicates, arrays, missing/empty
 fields, wrong types and line breaks in field values are rejected with a
 fixed diagnostic that echoes neither supplied names nor values. The ID
