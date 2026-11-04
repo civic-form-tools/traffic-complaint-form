@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dedicated synthetic SMTP exercise (#64): invalid fictional identity, strict
+  testing-only configuration, final-envelope recipient lock, no artifacts.
 - Drop Python 3.10 support (#58): Python 3.11 minimum; CI tests 3.11-3.13.
 
 - fill-batch workflow fixes (#55): post-run verification checks every output
