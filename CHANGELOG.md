@@ -2,11 +2,9 @@
 
 ## Unreleased
 
-- fill-batch workflow fixes (#55): the post-run verification now checks
-  every output archive (a split batch no longer fails the run), and
-  dry runs over sample data upload the verified ZIP(s) as 1-day
-  artifacts. The upload is gated to dummy data (`encrypted_batch`
-  empty), so real case data can never become a public-repo artifact.
+- fill-batch workflow fixes (#55): post-run verification checks every output
+  archive. Artifact upload removed before release: sample cases still use
+  the complainant identity in the bundle and are not wholly synthetic.
 
 - Batch size cap with automatic splitting (#51): each emailed archive is
   capped at `max_archive_mb` (FILING_BUNDLE v2, default 10 MB measured on the

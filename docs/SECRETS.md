@@ -4,8 +4,9 @@ Create **FILING_BUNDLE** under Settings -> Environments -> **production** ->
 Environment secrets. Do not create a repository-level copy. The parser
 requires the complete version-1 JSON object, including delivery settings,
 even for dry runs. There is no fallback to the old individual secrets.
-Dry-run artifact uploads are gated to sample data only, so a real
-`encrypted_batch` run can never leave a downloadable artifact in this public repo.
+No archives are uploaded as workflow artifacts. Sample cases still use the
+complainant identity in FILING_BUNDLE, so sample mode does not make a
+production-bundle run wholly synthetic.
 
 Replace every placeholder locally or directly in GitHub. Never put real
 values in an issue, PR, repository file, command argument or chat.
