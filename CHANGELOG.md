@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Drop Python 3.10 support (#58): Python 3.11 minimum; CI tests 3.11-3.13.
+
 - fill-batch workflow fixes (#55): post-run verification checks every output
   archive. Artifact upload removed before release: sample cases still use
   the complainant identity in the bundle and are not wholly synthetic.

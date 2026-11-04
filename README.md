@@ -3,7 +3,7 @@
 [![CI](https://github.com/civic-form-tools/traffic-complaint-form/actions/workflows/ci.yml/badge.svg)](https://github.com/civic-form-tools/traffic-complaint-form/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/civic-form-tools/traffic-complaint-form/actions/workflows/codeql.yml/badge.svg)](https://github.com/civic-form-tools/traffic-complaint-form/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python 3.10-3.13](https://img.shields.io/badge/python-3.10--3.13-blue.svg)](pyproject.toml)
+[![Python 3.11-3.13](https://img.shields.io/badge/python-3.11--3.13-blue.svg)](pyproject.toml)
 
 Fill the Israel Police traffic complaint form (תלונה על עבירת תנועה, Jerusalem
 District Traffic Department) from a GitHub Actions workflow, and receive the
