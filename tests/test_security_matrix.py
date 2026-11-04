@@ -292,7 +292,6 @@ def test_tristate_rejects_unknown_tokens(raw):
         TriState.parse(raw)
 
 
-@pytest.mark.xfail(strict=True, reason="gap on main: TriState.parse echoes the input (fixed in #34)")
 def test_tristate_diagnostic_is_value_free():
     with pytest.raises(ValueError) as info:
         TriState.parse("ZZ-planted")

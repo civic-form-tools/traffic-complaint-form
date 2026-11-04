@@ -20,6 +20,21 @@ ENCRYPTION_NOTE = (
     "לסמן אזהרת 'unscannable' עליו - זה צפוי ואינו תקלה.\n\n"
 )
 
+BODY_BATCH_REAL = (
+    "מצורף קובץ ZIP אחד מוצפן ובו מספר טופסי תלונה ממולאים.\n"
+    "הסיסמה היא הסיסמה שהוגדרה בשדה archive_password של FILING_BUNDLE.\n"
+    "הטפסים בתוך קובץ ה-ZIP אינם נעולים בנפרד - ההצפנה היא על קובץ ה-ZIP עצמו.\n\n"
+    + ENCRYPTION_NOTE
+    + "הודעה אוטומטית ממערכת traffic-complaint-form."
+)
+
+BODY_BATCH_TEST = (
+    "מצורף קובץ ZIP לדוגמה, מוצפן בסיסמה.\n"
+    "הסיסמה הוגדרה בשדה archive_password של FILING_BUNDLE.\n\n"
+    + ENCRYPTION_NOTE
+    + "הודעה אוטומטית ממערכת traffic-complaint-form."
+)
+
 BODY_REAL = (
     "מצורף טופס התלונה הממולא, מוצפן בסיסמה.\n"
     "הסיסמה היא הסיסמה הייעודית שהוגדרה בשדה pdf_password של FILING_BUNDLE.\n\n"
@@ -64,6 +79,17 @@ def send_encrypted_pdf(
         subtype="pdf",
         filename=attachment_path.name,
     )
+    _deliver(message, smtp_host, smtp_port, smtp_username, smtp_password, smtp_factory)
+
+
+def _deliver(
+    message: EmailMessage,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_username: str,
+    smtp_password: str,
+    smtp_factory: Callable[..., smtplib.SMTP],
+) -> None:
     with smtp_factory(smtp_host, smtp_port, timeout=60) as server:
         server.ehlo()
         server.starttls()
@@ -73,3 +99,34 @@ def send_encrypted_pdf(
     if refused:
         raise RuntimeError(f"SMTP server refused {len(refused)} recipient(s)")
     logger.info("SMTP accepted the message for delivery")
+
+
+def send_encrypted_archive(
+    *,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_username: str,
+    smtp_password: str,
+    from_address: str,
+    recipient: str,
+    archive_path: Path,
+    case_count: int,
+    batch_date: str,
+    test_mode: bool = False,
+    smtp_factory: Callable[..., smtplib.SMTP] = smtplib.SMTP,
+) -> None:
+    """Deliver one encrypted ZIP holding several open complaint PDFs (batch mode)."""
+    message = EmailMessage()
+    message["From"] = from_address
+    message["To"] = recipient
+    # ASCII-only subject, same walla-gateway reason as the single-form mail.
+    prefix = "[TEST] " if test_mode else ""
+    message["Subject"] = f"{prefix}Traffic complaint forms - batch of {case_count} - {batch_date}"
+    message.set_content(BODY_BATCH_TEST if test_mode else BODY_BATCH_REAL)
+    message.add_attachment(
+        archive_path.read_bytes(),
+        maintype="application",
+        subtype="zip",
+        filename=archive_path.name,
+    )
+    _deliver(message, smtp_host, smtp_port, smtp_username, smtp_password, smtp_factory)
