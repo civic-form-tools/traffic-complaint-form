@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import tempfile
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -113,8 +114,9 @@ class LockedSMTP:
         return self.server.send_message(message, to_addrs=[self.approved])
 
 
-def run(config, approved, *, archive_format, split, smtp_factory):
-    """Build four dummy forms and send using the same production SMTP function."""
+@contextmanager
+def build_archives(password, *, archive_format, split):
+    """Builder receives test encryption material, never SMTP settings."""
     person = Complainant(**DUMMY_IDENTITY)
     case = sample_case()
     case = replace(case, vehicle=replace(case.vehicle, number="00-000-00"))
@@ -134,7 +136,6 @@ def run(config, approved, *, archive_format, split, smtp_factory):
                 path.write_bytes(buffer.getvalue())
             members.append((path.name, path))
         cap = (1 if split else 10) * 1024 * 1024
-        password = config["archive_password"]
         groups = pack_members(members, password=password, fmt=archive_format, max_bytes=cap)
         archives = []
         for number, group in enumerate(groups, 1):
@@ -142,24 +143,33 @@ def run(config, approved, *, archive_format, split, smtp_factory):
             create_archive(group, archive, password=password, fmt=archive_format)
             verify_archive(archive, password=password, expected_members=len(group), max_bytes=cap)
             archives.append(archive)
-        delivery = config["delivery"]
-        for number, archive in enumerate(archives, 1):
-            send_encrypted_archive(
-                smtp_host=delivery["smtp_host"],
-                smtp_port=delivery["smtp_port"],
-                smtp_username=delivery["smtp_username"],
-                smtp_password=delivery["smtp_app_password"],
-                from_address=delivery["smtp_from"],
-                recipient=approved,
-                archive_path=archive,
-                case_count=4,
-                batch_date="SYNTHETIC",
-                test_mode=True,
-                part=number,
-                total_parts=len(archives),
-                smtp_factory=lambda *a, **kw: LockedSMTP(smtp_factory(*a, **kw), approved),
-            )
-        logger.info("Synthetic SMTP exercise accepted (%s parts)", len(archives))
+        yield tuple(archives)
+
+
+def deliver_archives(archives, delivery, approved, *, smtp_factory):
+    """Sender receives SMTP-only settings and verified paths."""
+    for number, archive in enumerate(archives, 1):
+        send_encrypted_archive(
+            smtp_host=delivery["smtp_host"],
+            smtp_port=delivery["smtp_port"],
+            smtp_username=delivery["smtp_username"],
+            smtp_password=delivery["smtp_app_password"],
+            from_address=delivery["smtp_from"],
+            recipient=approved,
+            archive_path=archive,
+            case_count=4,
+            batch_date="SYNTHETIC",
+            test_mode=True,
+            part=number,
+            total_parts=len(archives),
+            smtp_factory=lambda *a, **kw: LockedSMTP(smtp_factory(*a, **kw), approved),
+        )
+    logger.info("Synthetic SMTP exercise accepted (%s parts)", len(archives))
+
+
+def run(config, approved, *, archive_format, split, smtp_factory):
+    with build_archives(config["archive_password"], archive_format=archive_format, split=split) as archives:
+        deliver_archives(archives, config["delivery"], approved, smtp_factory=smtp_factory)
 
 
 def main(argv=None):

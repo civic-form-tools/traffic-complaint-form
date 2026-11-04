@@ -252,3 +252,173 @@ def test_duplicate_json_and_missing_test_bundle():
     e.pop("TEST_FILING_BUNDLE")
     with pytest.raises(s.SyntheticError):
         s.load_test_config(e)
+
+
+@pytest.mark.parametrize("fmt", ["zip-legacy", "zip-aes"])
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("fail_send", [False, True])
+def test_complete_noninterference(tmp_path, monkeypatch, caplog, capsys, fmt, split, fail_send):
+    """Actual main -> renderer -> encrypted archive -> SMTP under all tripwires."""
+    import builtins
+    import os
+    import smtplib
+
+    import pyzipper
+    from pypdf import PdfReader
+
+    from traffic_complaint_form.config import FilingConfig
+
+    canaries = ["ZZ-PRODUCTION-BUNDLE-987", "ZZ-PRODUCTION-KEY-654", "ZZ-PRIVATE-FILE-321"]
+    monkeypatch.setenv("FILING_BUNDLE", canaries[0])
+    monkeypatch.setenv("CASE_DATA_PRIVATE_KEY", canaries[1])
+    monkeypatch.setenv("TEST_FILING_BUNDLE", json.dumps(config()))
+    monkeypatch.setenv("TEST_APPROVED_RECIPIENT", "owner@example.invalid")
+    monkeypatch.chdir(tmp_path)
+    trap = tmp_path / "production.json"
+    trap.write_text(canaries[2])
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(s.tempfile, "tempdir", str(scratch))
+    original_get = type(os.environ).__getitem__
+    original_builtin = builtins.open
+    original_io = io.open
+    original_os = os.open
+
+    def env_read(obj, key):
+        assert key not in {"FILING_BUNDLE", "CASE_DATA_PRIVATE_KEY"}, "production env read"
+        return original_get(obj, key)
+
+    def guard_file(original):
+        def wrapped(file, *args, **kwargs):
+            if isinstance(file, (str, bytes, os.PathLike)):
+                assert Path(file).absolute() != trap, "production file read"
+            return original(file, *args, **kwargs)
+
+        return wrapped
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("production parser/decrypt read")
+
+    monkeypatch.setattr(type(os.environ), "__getitem__", env_read)
+    monkeypatch.setattr(builtins, "open", guard_file(original_builtin))
+    monkeypatch.setattr(io, "open", guard_file(original_io))
+    monkeypatch.setattr(os, "open", guard_file(original_os))
+    monkeypatch.setattr(FilingConfig, "from_env", forbidden)
+    monkeypatch.setattr("traffic_complaint_form.crypto.decrypt_payload", forbidden)
+
+    class CapturedSMTP(SMTP):
+        def send_message(self, message, *, to_addrs):
+            super().send_message(message, to_addrs=to_addrs)
+            if fail_send:
+                raise RuntimeError(canaries[0])
+            return {}
+
+    SMTP.messages = []
+    monkeypatch.setattr(smtplib, "SMTP", CapturedSMTP)
+    args = ["--archive-format", fmt] + (["--split"] if split else [])
+    assert s.main(args) == (1 if fail_send else 0)
+    assert not list(scratch.iterdir())
+    assert len(SMTP.messages) == (1 if fail_send else (2 if split else 1))
+    observed = caplog.text + str(capsys.readouterr())
+    for message in SMTP.messages:
+        observed += str(message)
+        part = list(message.iter_attachments())[0]
+        with pyzipper.AESZipFile(io.BytesIO(part.get_payload(decode=True))) as archive:
+            for name in archive.namelist():
+                observed += name
+                for bad in (None, b"wrong"):
+                    with pytest.raises((RuntimeError, zipfile.BadZipFile, zlib.error)):
+                        archive.read(name, pwd=bad)
+                blob = archive.read(name, pwd=config()["archive_password"].encode())
+                reader = PdfReader(io.BytesIO(blob))
+                assert not reader.is_encrypted
+                text = "\n".join(p.extract_text() for p in reader.pages)
+                assert "TEST-NOT-A-VALID-ID" in text
+                assert "NOT-A-PHONE" in text
+                assert "ZZ-SYNTHETIC-NOT-A-PERSON" in text
+                assert "00-000-00" in text
+                observed += text + blob.decode("latin1")
+    for canary in canaries:
+        assert canary not in observed
+
+
+@pytest.mark.parametrize("mutation", ["env", "file", "parser", "decrypt"])
+def test_real_path_mutations_killed(tmp_path, monkeypatch, mutation):
+    """Inject forbidden access INTO renderer called by main, not standalone code."""
+    import os
+    import smtplib
+
+    from traffic_complaint_form.config import FilingConfig
+
+    monkeypatch.setenv("TEST_FILING_BUNDLE", json.dumps(config()))
+    monkeypatch.setenv("TEST_APPROVED_RECIPIENT", "owner@example.invalid")
+    monkeypatch.setenv("FILING_BUNDLE", "ZZ-PRODUCTION-MUTATION-CANARY")
+    original = s.render_form
+    touched = []
+
+    def forbidden(*args, **kwargs):
+        touched.append(mutation)
+        raise AssertionError("forbidden mutation")
+
+    get = type(os.environ).__getitem__
+
+    def guarded_env(obj, key):
+        if key == "FILING_BUNDLE":
+            return forbidden()
+        return get(obj, key)
+
+    monkeypatch.setattr(type(os.environ), "__getitem__", guarded_env)
+    monkeypatch.setattr(FilingConfig, "from_env", forbidden)
+    monkeypatch.setattr("traffic_complaint_form.crypto.decrypt_payload", forbidden)
+    trap = tmp_path / "production.json"
+    trap.write_text("ZZ-PRODUCTION-FILE")
+    open_path = Path.open
+
+    def guarded_path(path, *args, **kwargs):
+        if path == trap:
+            return forbidden()
+        return open_path(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", guarded_path)
+
+    def mutated_renderer(*args, **kwargs):
+        if mutation == "env":
+            os.environ.get("FILING_BUNDLE")
+        elif mutation == "file":
+            trap.read_text()
+        elif mutation == "parser":
+            FilingConfig.from_env({})
+        else:
+            from traffic_complaint_form.crypto import decrypt_payload
+
+            decrypt_payload("", "")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(s, "render_form", mutated_renderer)
+    monkeypatch.setattr(smtplib, "SMTP", SMTP)
+    SMTP.messages = []
+    assert s.main([]) == 1
+    assert touched == [mutation]
+    assert not SMTP.messages
+
+
+def test_builder_never_receives_delivery_config(monkeypatch):
+    from contextlib import contextmanager
+
+    seen = []
+
+    @contextmanager
+    def builder(password, *, archive_format, split):
+        assert isinstance(password, str) and password == config()["archive_password"]
+        seen.append("build")
+        yield ()
+
+    def sender(paths, delivery, approved, *, smtp_factory):
+        assert set(delivery) == s.DELIVERY_KEYS
+        assert "archive_password" not in delivery and "complainant" not in delivery
+        seen.append("send")
+
+    monkeypatch.setattr(s, "build_archives", builder)
+    monkeypatch.setattr(s, "deliver_archives", sender)
+    s.run(config(), "owner@example.invalid", archive_format="zip-aes", split=False, smtp_factory=SMTP)
+    assert seen == ["build", "send"]
