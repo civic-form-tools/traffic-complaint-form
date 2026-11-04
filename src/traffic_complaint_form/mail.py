@@ -28,6 +28,14 @@ BODY_BATCH_REAL = (
     + "הודעה אוטומטית ממערכת traffic-complaint-form."
 )
 
+BODY_BATCH_PART_REAL = (
+    "מצורף חלק {part} מתוך {total} של קובצי ZIP מוצפנים עם טופסי התלונה הממולאים.\n"
+    "כל החלקים מוצפנים באותה סיסמה - השדה archive_password של FILING_BUNDLE.\n"
+    "הטפסים בתוך קובצי ה-ZIP אינם נעולים בנפרד - ההצפנה היא על קובצי ה-ZIP עצמם.\n\n"
+    + ENCRYPTION_NOTE
+    + "הודעה אוטומטית ממערכת traffic-complaint-form."
+)
+
 BODY_BATCH_TEST = (
     "מצורף קובץ ZIP לדוגמה, מוצפן בסיסמה.\n"
     "הסיסמה הוגדרה בשדה archive_password של FILING_BUNDLE.\n\n"
@@ -113,16 +121,29 @@ def send_encrypted_archive(
     case_count: int,
     batch_date: str,
     test_mode: bool = False,
+    part: int = 1,
+    total_parts: int = 1,
     smtp_factory: Callable[..., smtplib.SMTP] = smtplib.SMTP,
 ) -> None:
-    """Deliver one encrypted ZIP holding several open complaint PDFs (batch mode)."""
+    """Deliver one encrypted ZIP holding several open complaint PDFs (batch mode).
+
+    An over-cap batch is split into parts (user decision 2026-11-04): each
+    part is its own encrypted ZIP and email, all with the same password.
+    """
     message = EmailMessage()
     message["From"] = from_address
     message["To"] = recipient
     # ASCII-only subject, same walla-gateway reason as the single-form mail.
     prefix = "[TEST] " if test_mode else ""
-    message["Subject"] = f"{prefix}Traffic complaint forms - batch of {case_count} - {batch_date}"
-    message.set_content(BODY_BATCH_TEST if test_mode else BODY_BATCH_REAL)
+    part_text = f" - part {part} of {total_parts}" if total_parts > 1 else ""
+    message["Subject"] = f"{prefix}Traffic complaint forms - batch of {case_count}{part_text} - {batch_date}"
+    if test_mode:
+        body = BODY_BATCH_TEST
+    elif total_parts > 1:
+        body = BODY_BATCH_PART_REAL.replace("{part}", str(part)).replace("{total}", str(total_parts))
+    else:
+        body = BODY_BATCH_REAL
+    message.set_content(body)
     message.add_attachment(
         archive_path.read_bytes(),
         maintype="application",

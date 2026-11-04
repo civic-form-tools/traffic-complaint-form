@@ -117,7 +117,9 @@ schema above (`incidents[]` merge included). Rules:
 - Every case is validated before anything is rendered; an invalid case fails
   the whole run and no archive is mailed. Errors cite the case number
   (`case #2: ...`), never case content.
-- The run produces **open** (unlocked) PDFs inside ONE encrypted ZIP whose
+- The run produces **open** (unlocked) PDFs inside encrypted ZIP archives of
+  at most `max_archive_mb` (default 10 MB) each - over-cap batches arrive as
+  several "part K of M" emails, all with the same password. Each ZIP's
   password is the bundle's `archive_password`; member names are neutral
   (`complaint-01.pdf` ... in payload order). The archive format is the
   bundle's `archive_format` (default `zip-legacy`; see SECRETS.md for the

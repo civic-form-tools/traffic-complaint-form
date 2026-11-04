@@ -163,3 +163,17 @@ def test_v1_with_archive_keys_rejected_as_unknown():
     with pytest.raises(BundleError) as error:
         FilingConfig.from_env({"FILING_BUNDLE": json.dumps(bundle)})
     assert error.value.code == "root"
+
+
+def test_max_archive_mb_defaults_and_validates():
+    config = FilingConfig.from_env({"FILING_BUNDLE": json.dumps(BUNDLE_V2)})
+    assert config.max_archive_mb == 10
+    config = FilingConfig.from_env({"FILING_BUNDLE": json.dumps({**BUNDLE_V2, "max_archive_mb": 5})})
+    assert config.max_archive_mb == 5
+
+
+@pytest.mark.parametrize("value", [0, 25, "10", True, 10.5, -1])
+def test_max_archive_mb_rejected_without_echo(value):
+    with pytest.raises(BundleError) as error:
+        FilingConfig.from_env({"FILING_BUNDLE": json.dumps({**BUNDLE_V2, "max_archive_mb": value})})
+    assert error.value.code == "max_archive_mb"

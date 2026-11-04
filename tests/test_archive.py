@@ -157,3 +157,40 @@ def test_member_content_is_open_pdf(members, tmp_path):
         data = z.read("complaint-01.pdf")
     with pikepdf.open(io.BytesIO(data)) as pdf:
         assert len(pdf.pages) == 1
+
+
+# --- Size cap and splitting (#51) ---
+
+from traffic_complaint_form.archive import OversizedMemberError, _archive_bytes, pack_members  # noqa: E402
+
+
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_pack_members_single_group_when_under_cap(members, fmt):
+    groups = pack_members(members, max_bytes=10 * 1024 * 1024, password=PASSWORD, fmt=fmt)
+    assert groups == [members]
+
+
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_pack_members_splits_greedily_in_order(members, fmt):
+    # Cap fits exactly one member per archive, measured on the real backend bytes.
+    one = len(_archive_bytes(members[:1], password=PASSWORD, fmt=fmt))
+    groups = pack_members(members, max_bytes=one + 50, password=PASSWORD, fmt=fmt)
+    assert len(groups) == 3
+    assert [g[0][0] for g in groups] == ["complaint-01.pdf", "complaint-02.pdf", "complaint-03.pdf"]
+    flat = [name for group in groups for name, _ in group]
+    assert flat == [name for name, _ in members]
+
+
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_pack_members_single_oversized_member_fails_clearly(members, fmt):
+    with pytest.raises(OversizedMemberError, match="cannot be split|alone is over"):
+        pack_members(members, max_bytes=100, password=PASSWORD, fmt=fmt)
+
+
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_verify_archive_enforces_max_bytes(members, tmp_path, fmt):
+    out = tmp_path / f"batch-{fmt}.zip"
+    create_archive(members, out, password=PASSWORD, fmt=fmt)
+    verify_archive(out, password=PASSWORD, expected_members=3, max_bytes=out.stat().st_size)
+    with pytest.raises(ArchiveVerificationError, match="over the 100-byte email cap"):
+        verify_archive(out, password=PASSWORD, expected_members=3, max_bytes=100)

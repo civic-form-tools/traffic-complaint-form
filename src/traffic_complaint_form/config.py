@@ -14,6 +14,12 @@ from .models import Complainant, is_valid_israeli_id
 ARCHIVE_FORMATS = ("zip-legacy", "zip-aes")
 DEFAULT_ARCHIVE_FORMAT = "zip-legacy"
 
+# Batch archive email cap in MB (measured on the archive file; base64 adds
+# ~33% on the wire). 24 keeps even the largest archive under Gmail's 25 MB
+# MIME limit after encoding.
+DEFAULT_MAX_ARCHIVE_MB = 10
+MAX_ARCHIVE_MB_LIMIT = 24
+
 
 class BundleError(ValueError):
     """Only parser-owned diagnostic codes can cross the log boundary."""
@@ -31,6 +37,7 @@ class BundleError(ValueError):
             "pdf_password",
             "archive_password",
             "archive_format",
+            "max_archive_mb",
             "delivery",
             "delivery.recipient_email",
             "delivery.smtp_from",
@@ -104,6 +111,7 @@ class FilingConfig:
     # batch runs must call from_env(require_archive=True) and fail closed.
     archive_password: str | None = None
     archive_format: str = DEFAULT_ARCHIVE_FORMAT
+    max_archive_mb: int = DEFAULT_MAX_ARCHIVE_MB
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str], *, require_archive: bool = False) -> FilingConfig:
@@ -121,7 +129,7 @@ class FilingConfig:
             base_keys = {"version", "complainant", "pdf_password", "delivery"}
             expected = set(base_keys)
             if version == 2:
-                expected |= {"archive_password", "archive_format"}
+                expected |= {"archive_password", "archive_format", "max_archive_mb"}
             keys = set(data)
             if not expected >= keys or not base_keys <= keys or (version == 2 and "archive_password" not in keys):
                 raise BundleError("root")
@@ -136,6 +144,7 @@ class FilingConfig:
             password = _strong_password(data["pdf_password"], "pdf_password", id_number=person["id_number"])
             archive_password = None
             archive_format = DEFAULT_ARCHIVE_FORMAT
+            max_archive_mb = DEFAULT_MAX_ARCHIVE_MB
             if version == 2:
                 archive_password = _strong_password(
                     data["archive_password"], "archive_password", id_number=person["id_number"], other=password
@@ -144,6 +153,11 @@ class FilingConfig:
                     archive_format = _text(data["archive_format"], "archive_format")
                     if archive_format not in ARCHIVE_FORMATS:
                         raise BundleError("archive_format")
+                if "max_archive_mb" in data:
+                    cap = data["max_archive_mb"]
+                    if type(cap) is not int or not 1 <= cap <= MAX_ARCHIVE_MB_LIMIT:
+                        raise BundleError("max_archive_mb")
+                    max_archive_mb = cap
             if require_archive and archive_password is None:
                 raise BundleError("archive_password")
             delivery = _object(
@@ -158,7 +172,7 @@ class FilingConfig:
                 delivery[key] = _text(delivery[key], "delivery." + key)
             if type(delivery["smtp_port"]) is not int or not 1 <= delivery["smtp_port"] <= 65535:
                 raise BundleError("delivery.smtp_port")
-            return cls(Complainant(**person), password, delivery, archive_password, archive_format)
+            return cls(Complainant(**person), password, delivery, archive_password, archive_format, max_archive_mb)
         except BundleError:
             raise
         except json.JSONDecodeError:

@@ -221,3 +221,98 @@ def test_batch_mail_subject_ascii(monkeypatch, tmp_path):
     assert "batch of 2" in captured["subject"]
     assert captured["subject"].startswith("[TEST] ")
     assert captured["filename"].endswith(".zip")
+
+
+# --- Size-capped splitting (#51) ---
+
+
+def test_batch_splits_into_multiple_emails(monkeypatch, tmp_path):
+    set_env(monkeypatch)
+    from traffic_complaint_form.archive import pack_members as real_pack
+
+    def capped_pack(members, *, max_bytes, password, fmt):
+        biggest = max(p.stat().st_size for _, p in members)
+        return real_pack(members, max_bytes=biggest + 600, password=password, fmt=fmt)
+
+    monkeypatch.setattr(cli, "pack_members", capped_pack)
+    sent = []
+    monkeypatch.setattr(cli, "send_encrypted_archive", lambda **k: sent.append(k))
+    assert main(["--batch-sample", "--out-dir", str(tmp_path)]) == 0
+    assert len(sent) == 2
+    assert (sent[0]["part"], sent[0]["total_parts"]) == (1, 2)
+    assert (sent[1]["part"], sent[1]["total_parts"]) == (2, 2)
+    names = sorted(p.name for p in tmp_path.glob("*.zip"))
+    assert "part1of2" in names[0] and "part2of2" in names[1]
+    # Global member numbering across parts, payload order preserved.
+    import pyzipper as pz
+
+    all_members = []
+    for part in sent:
+        with pz.AESZipFile(part["archive_path"]) as z:
+            z.setpassword(BUNDLE_V2["archive_password"].encode())
+            all_members += z.namelist()
+    assert all_members == ["complaint-01.pdf", "complaint-02.pdf"]
+
+
+def test_batch_oversized_single_document_aborts_before_mail(monkeypatch, tmp_path, caplog):
+    set_env(monkeypatch)
+
+    def boom(members, *, max_bytes, password, fmt):
+        from traffic_complaint_form.archive import OversizedMemberError
+
+        raise OversizedMemberError("member complaint-01.pdf alone is over the 100-byte archive cap")
+
+    monkeypatch.setattr(cli, "pack_members", boom)
+    monkeypatch.setattr(cli, "send_encrypted_archive", lambda **k: pytest.fail("must not send"))
+    with caplog.at_level(logging.INFO):
+        assert main(["--batch-sample", "--out-dir", str(tmp_path)]) == 3
+    assert "cannot be split" in caplog.text
+    assert not list(tmp_path.glob("*.zip"))
+
+
+def test_batch_multipart_subject_and_body(monkeypatch, tmp_path):
+    from traffic_complaint_form import mail
+
+    captured = []
+
+    class FakeSMTP:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def ehlo(self):
+            pass
+
+        def starttls(self):
+            pass
+
+        def login(self, u, p):
+            pass
+
+        def send_message(self, message):
+            captured.append(str(message["Subject"]))
+            return {}
+
+    part_path = tmp_path / "part.zip"
+    part_path.write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    mail.send_encrypted_archive(
+        smtp_host="h",
+        smtp_port=587,
+        smtp_username="u",
+        smtp_password="p",
+        from_address="a@b.c",
+        recipient="r@b.c",
+        archive_path=part_path,
+        case_count=7,
+        batch_date="04/11/2026",
+        part=2,
+        total_parts=3,
+        smtp_factory=FakeSMTP,
+    )
+    assert captured == ["Traffic complaint forms - batch of 7 - part 2 of 3 - 04/11/2026"]
+    assert captured[0].isascii()
