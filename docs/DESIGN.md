@@ -136,9 +136,52 @@ check runs before any setup.
 - Phase 2: S/MIME envelope to the user's certificate (replaces/shared with
   the PDF password).
 - `repository_dispatch` trigger from the private parking automation with an
-  encrypted payload per repeat-offence plate.
-- Witness rows beyond one; multi-case batch runs.
+  encrypted payload per repeat-offence plate (also the answer for batches
+  beyond the dispatch-input size cap).
+- Witness rows beyond one.
 - CodeRabbit enablement (public repo, per user convention).
+
+## Batch mode (2026-11-04, #42)
+
+Several complaints are filled in one run and delivered as ONE encrypted
+archive; the PDFs inside are open - the archive is the only encryption layer
+(user decision, unlike single mode's locked PDF). Format and password come
+from FILING_BUNDLE v2 (`archive_format`, `archive_password`).
+
+```mermaid
+flowchart LR
+    A["dispatch input: sealed-box<br>{"cases": [case, ...]}"] --> D["decrypt in memory"]
+    D --> V["validate ALL cases (fail-fast,<br>per-index diagnostics, no values)"]
+    V --> F["render N OPEN PDFs<br>(temp dir, neutral names<br>complaint-NN.pdf)"]
+    B[("FILING_BUNDLE v2<br>archive_password + archive_format")] --> Z
+    F --> Z["archive.py (pluggable)<br>zip-legacy default / zip-aes"]
+    Z --> W["verify: password required, N members,<br>each an open well-formed PDF, page caps"]
+    W --> M["one email, one ZIP attachment"]
+```
+
+Key decisions:
+
+- **zip-legacy (ZipCrypto) is the default despite being weak crypto**: the
+  2026-11-04 device test showed AES-256 ZIP does not open on the owner's
+  iPhone/Mac. The risk (Biham-Kocher known-plaintext over shared template
+  boilerplate) is accepted and documented in SECRETS.md; mitigations are a
+  long random password and neutral member names (ZIP never encrypts
+  filenames). `archive_format = "zip-aes"` swaps to WinZip AES-256
+  (pyzipper) with a one-field secret edit once devices support it. The
+  ZipCrypto writer is pure Python (pyzipper does not write it); interop is
+  pinned by tests against pyzipper, stdlib zipfile and Info-ZIP.
+- **Fail-fast**: any invalid case, render failure, page overflow or archive
+  failure aborts before any email; no partial archive is mailed. All cases
+  are validated before rendering; diagnostics cite case index only.
+- **Payload**: one sealed-box JSON `{"cases": [...]}` (each case = the
+  single-mode schema), capped at 20 cases so the ciphertext fits the
+  dispatch input. Larger batches need the future repository_dispatch
+  channel.
+- **Batch mail**: ASCII subject "Traffic complaint forms - batch of N -
+  DD/MM/YYYY" (same gateway rule), Hebrew body naming archive_password.
+- The `production` environment gate covers `fill-batch.yml` exactly as
+  `fill-form.yml`; workflow-structure tests enforce the same invariants on
+  both.
 
 ## Atomic filing configuration (2026-10-26)
 

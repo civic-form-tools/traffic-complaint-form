@@ -13,6 +13,7 @@ dependencies = [
     "weasyprint>=62",
     "pikepdf>=8",
     "pynacl>=1.5",
+    "pyzipper>=0.4",
 ]
 
 [project.optional-dependencies]
@@ -53,4 +54,4 @@ line-length = 120
 select = ["E", "F", "I", "W", "UP", "B", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S106"]
+"tests/*" = ["S101", "S105", "S106", "S603", "S607"]

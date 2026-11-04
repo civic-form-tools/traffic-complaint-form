@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from .models import CaseData, Incident, Offence, TriState, Vehicle, hebrew_weekday
+from .models import CaseBatch, CaseData, Incident, Offence, TriState, Vehicle, hebrew_weekday
 
 
 def sample_case() -> CaseData:
@@ -88,3 +88,8 @@ def sample_multi_case() -> CaseData:
         willing_to_testify=True,
         incidents=incidents,
     )
+
+
+def sample_batch() -> CaseBatch:
+    """Invented batch for pipeline testing: one classic case + one merged case."""
+    return CaseBatch(cases=(sample_case(), sample_multi_case()))

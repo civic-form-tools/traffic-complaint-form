@@ -1,4 +1,9 @@
-"""Fill, encrypt and email a form using one mandatory FILING_BUNDLE secret.
+"""Fill, encrypt and email complaint forms using one mandatory FILING_BUNDLE secret.
+
+Single mode fills one form and emails it as an individually locked PDF.
+Batch mode (--batch-encrypted/--batch-sample) fills several forms as OPEN
+PDFs and emails them inside one password-encrypted archive; the archive is
+the encryption layer (FILING_BUNDLE v2: archive_password, archive_format).
 
 Sample/test mode only adds a watermark. Encryption and the complete bundle
 remain mandatory in every mode. Separate legacy secrets are never consulted.
@@ -7,20 +12,23 @@ remain mandatory in every mode. Separate legacy secrets are never consulted.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
+from .archive import create_archive, verify_archive
 from .config import BundleError, FilingConfig
 from .encrypt import encrypt_pdf, verify_encrypted_pdf
 from .fill import render_form, template_base_url
-from .mail import send_encrypted_pdf
-from .models import CaseData
+from .mail import send_encrypted_archive, send_encrypted_pdf
+from .models import JERUSALEM_TZ, CaseBatch, CaseData
 from .pdf import html_to_pdf
-from .sample import sample_case
+from .sample import sample_batch, sample_case
 
 logger = logging.getLogger("traffic_complaint_form")
 
@@ -41,6 +49,17 @@ def build_parser() -> argparse.ArgumentParser:
         "Use this on the public repo so plates and incident data never appear in public inputs or logs.",
     )
     source.add_argument("--sample", action="store_true", help="Use invented sample case data")
+    source.add_argument(
+        "--batch-encrypted",
+        type=Path,
+        help='Path to a sealed-box encrypted BATCH payload ({"cases": [...]}, base64). '
+        "Requires CASE_DATA_PRIVATE_KEY and a version-2 FILING_BUNDLE (archive_password).",
+    )
+    source.add_argument(
+        "--batch-sample",
+        action="store_true",
+        help="Batch mode with invented sample cases (pipeline test)",
+    )
     parser.add_argument("--out-dir", type=Path, default=Path("out"), help="Directory for the encrypted PDF")
     parser.add_argument("--dry-run", action="store_true", help="Build, encrypt and verify, but skip the email")
     parser.add_argument("--validate-config", action="store_true", help="Validate bundle only; no PDF or email")
@@ -62,18 +81,21 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     encrypt_output = is_encrypt_output()
-    if args.case_encrypted and not os.environ.get("CASE_DATA_PRIVATE_KEY", "").strip():
+    if (args.case_encrypted or args.batch_encrypted) and not os.environ.get("CASE_DATA_PRIVATE_KEY", "").strip():
         logger.error("Missing required secret environment variables (names only): CASE_DATA_PRIVATE_KEY")
         return EXIT_MISSING_CONFIG
     test_mode = is_test_mode()
     if not encrypt_output:
         logger.error("PDF encryption is mandatory in every mode - refusing to run")
         return EXIT_UNSAFE
+    batch_mode = bool(args.batch_encrypted or args.batch_sample)
     try:
-        config = FilingConfig.from_env(os.environ)
+        config = FilingConfig.from_env(os.environ, require_archive=batch_mode)
     except BundleError as exc:
         logger.error("%s", exc)
         return EXIT_MISSING_CONFIG
+    if batch_mode:
+        return _run_batch(args, config, test_mode)
     if args.validate_config:
         logger.info("FILING_BUNDLE validation OK (values withheld); no PDF or email")
         return 0
@@ -106,8 +128,6 @@ def main(argv: list[str] | None = None) -> int:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     if private_case:
-        import hashlib
-
         digest = hashlib.sha256(args.case_encrypted.read_bytes()).hexdigest()[:8]
         outfile = args.out_dir / f"traffic-complaint-{case.offence.date.isoformat()}-{digest}.pdf"
     else:
@@ -160,6 +180,88 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Email delivery failed (details withheld)")
         return EXIT_FAILED
     logger.info("Done: encrypted PDF delivered to the configured recipient (test_mode=%s)", test_mode)
+    return 0
+
+
+def _run_batch(args: argparse.Namespace, config: FilingConfig, test_mode: bool) -> int:
+    """Fill N cases as OPEN PDFs, pack into one encrypted archive, email it.
+
+    Fail-fast (user decision 2026-11-04): all cases are validated before any
+    rendering, and any failure aborts the run - no partial archive is mailed.
+    Per-PDF encryption stays ON for single mode only; batch members are open
+    by design and the archive is the encryption layer.
+    """
+    if args.batch_encrypted:
+        from .crypto import CaseDecryptionError, decrypt_payload
+
+        try:
+            payload = decrypt_payload(
+                os.environ["CASE_DATA_PRIVATE_KEY"], args.batch_encrypted.read_text(encoding="utf-8")
+            )
+            batch = CaseBatch.from_dict(json.loads(payload.decode("utf-8")))
+        except (CaseDecryptionError, ValueError, json.JSONDecodeError):
+            logger.error("Invalid encrypted batch data (contents withheld)")
+            return EXIT_MISSING_CONFIG
+        digest = hashlib.sha256(args.batch_encrypted.read_bytes()).hexdigest()[:8]
+        logger.info("Batch payload decrypted in memory (%s cases, contents stay out of logs)", len(batch.cases))
+    else:
+        batch = sample_batch()
+        digest = "sample"
+
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    today = datetime.now(JERUSALEM_TZ).date()
+    outfile = args.out_dir / f"traffic-complaints-batch-{today.isoformat()}-{digest}.zip"
+
+    with tempfile.TemporaryDirectory(prefix="tcf-batch-") as tmp:
+        members: list[tuple[str, Path]] = []
+        for index, case in enumerate(batch.cases, start=1):
+            member_path = Path(tmp) / f"complaint-{index:02d}.pdf"
+            try:
+                html_text = render_form(case, config.complainant, test_mode=test_mode)
+                pages = html_to_pdf(html_text, base_url=template_base_url(), out_path=member_path)
+            except Exception:
+                logger.error("Failed to render case #%s (details withheld)", index)
+                return EXIT_FAILED
+            max_pages = 3 if len(case.incidents) > 1 else 1
+            if not 1 <= pages <= max_pages:
+                logger.error(
+                    "Case #%s rendered %s pages, expected %s - shorten the description(s)",
+                    index,
+                    pages,
+                    "1" if max_pages == 1 else f"1-{max_pages}",
+                )
+                return EXIT_OVERFLOW
+            members.append((f"complaint-{index:02d}.pdf", member_path))
+        try:
+            create_archive(members, outfile, password=config.archive_password, fmt=config.archive_format)
+            verify_archive(outfile, password=config.archive_password, expected_members=len(members))
+        except Exception:
+            logger.error("Archive creation or verification failed (details withheld)")
+            outfile.unlink(missing_ok=True)
+            return EXIT_FAILED
+        logger.info("Encrypted archive verified (%s cases, %s bytes)", len(members), outfile.stat().st_size)
+
+    if args.dry_run:
+        logger.info("Dry run: email skipped. Encrypted archive kept at %s", outfile.name)
+        return 0
+
+    try:
+        send_encrypted_archive(
+            smtp_host=config.delivery["smtp_host"],
+            smtp_port=config.delivery["smtp_port"],
+            smtp_username=config.delivery["smtp_username"],
+            smtp_password=config.delivery["smtp_app_password"],
+            from_address=config.delivery["smtp_from"],
+            recipient=config.delivery["recipient_email"],
+            archive_path=outfile,
+            case_count=len(batch.cases),
+            batch_date=today.strftime("%d/%m/%Y"),
+            test_mode=test_mode,
+        )
+    except Exception:
+        logger.error("Email delivery failed (details withheld)")
+        return EXIT_FAILED
+    logger.info("Done: encrypted archive delivered to the configured recipient (test_mode=%s)", test_mode)
     return 0
 
 

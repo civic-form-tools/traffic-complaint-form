@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Batch mode (#42): the new `Fill and send complaint forms (batch)` workflow
+  fills N cases from one sealed-box `{"cases": [...]}` payload and emails ONE
+  encrypted ZIP of open PDFs (members `complaint-NN.pdf`). The archive is
+  the encryption layer: pluggable `archive.py` with `zip-legacy` (default,
+  pure-Python ZipCrypto writer, Info-ZIP interop-tested) and `zip-aes`
+  (AES-256 via pyzipper) backends selected by the bundle's `archive_format`.
+  Fail-fast validation with per-index diagnostics; `TriState.parse` no longer
+  echoes rejected values. Workflow-structure tests now enforce the gated-job
+  secret-scope invariants on both filing workflows. (#44, #45, #46)
+
 - FILING_BUNDLE version 2: optional batch-mode fields `archive_password`
   (required in v2) and `archive_format` (`zip-legacy` default, `zip-aes`
   optional) for the upcoming multi-form archive delivery. Version 1 bundles
