@@ -51,27 +51,39 @@ def test_choice_options_and_defaults_are_strings():
                 assert isinstance(default, str), f"{path.name}:{name} non-string default {default!r}"
 
 
+GATED = {
+    ".github/workflows/fill-form.yml": ("fill", "Fill, verify and send", "encrypted_case"),
+    ".github/workflows/fill-batch.yml": ("fill-batch", "Fill, archive, verify and send", "encrypted_batch"),
+}
+
+
 def test_filing_boundary_and_secret_scope():
-    workflow = yaml.safe_load(Path(".github/workflows/fill-form.yml").read_text())
-    job = workflow["jobs"]["fill"]
+    for path, (job_name, step_name, input_name) in GATED.items():
+        _check_gated_workflow(path, job_name, step_name, input_name)
+
+
+def _check_gated_workflow(path, job_name, step_name, input_name):
+    workflow = yaml.safe_load(Path(path).read_text())
+    job = workflow["jobs"][job_name]
     assert job["environment"] == "production"
     assert job["if"] == "github.ref == 'refs/heads/main'"
     assert "env" not in job  # credentials must not reach checkout, pip or package setup
     steps = job["steps"]
     secret_steps = [s for s in steps if "secrets." in str(s)]
     assert len(secret_steps) == 1
-    assert secret_steps[0]["name"] == "Fill, verify and send"
+    assert secret_steps[0]["name"] == step_name
     assert secret_steps[0]["env"]["FILING_BUNDLE"] == "${{ secrets.FILING_BUNDLE }}"
-    text = Path(".github/workflows/fill-form.yml").read_text()
-    for name in ["COMPLAINANT_ID", "PDF_PASSWORD", "SMTP_APP_PASSWORD", "RECIPIENT_EMAIL"]:
+    text = Path(path).read_text()
+    for name in ["COMPLAINANT_ID", "PDF_PASSWORD", "SMTP_APP_PASSWORD", "RECIPIENT_EMAIL", "ARCHIVE_PASSWORD"]:
         assert "secrets." + name not in text
-    assert "'${{ inputs.encrypted_case }}'" not in text
+    assert "'${{ inputs." + input_name + " }}'" not in text
 
 
 def test_sample_verification_always_watermarked():
-    workflow = yaml.safe_load(Path(".github/workflows/fill-form.yml").read_text())
-    step = next(s for s in workflow["jobs"]["fill"]["steps"] if s.get("name") == "Fill, verify and send")
-    assert step["env"]["TEST_MODE"] == "${{ inputs.encrypted_case == '' && 'true' || vars.TEST_MODE }}"
+    for path, (job_name, step_name, input_name) in GATED.items():
+        workflow = yaml.safe_load(Path(path).read_text())
+        step = next(s for s in workflow["jobs"][job_name]["steps"] if s.get("name") == step_name)
+        assert step["env"]["TEST_MODE"] == ("${{ inputs." + input_name + " == '' && 'true' || vars.TEST_MODE }}")
 
 
 FIRST_PARTY_ACTION_PREFIXES = ("actions/", "github/")
@@ -99,29 +111,31 @@ def test_every_action_is_pinned_to_a_full_commit_sha():
 def test_gated_job_runs_only_first_party_actions():
     """The job exposed to FILING_BUNDLE/CASE_DATA_PRIVATE_KEY must not run
     third-party action code (checkout/setup-python are GitHub-owned)."""
-    workflow = yaml.safe_load(Path(".github/workflows/fill-form.yml").read_text())
-    job = workflow["jobs"]["fill"]
-    for step in job["steps"]:
-        uses = step.get("uses")
-        if uses:
-            assert uses.startswith(FIRST_PARTY_ACTION_PREFIXES), f"gated job uses third-party action {uses!r}"
+    for path, (job_name, _step, _input) in GATED.items():
+        workflow = yaml.safe_load(Path(path).read_text())
+        for step in workflow["jobs"][job_name]["steps"]:
+            uses = step.get("uses")
+            if uses:
+                assert uses.startswith(FIRST_PARTY_ACTION_PREFIXES), f"gated job uses third-party action {uses!r}"
 
 
 def test_case_key_referenced_only_inside_the_gated_job():
     """CASE_DATA_PRIVATE_KEY must exist only as a production environment
-    secret and be referenced only by the single gated step."""
+    secret and be referenced only by the single gated step of each gated
+    workflow (single fill and batch fill)."""
     for path in WORKFLOWS:
         text = path.read_text(encoding="utf-8")
         if "CASE_DATA_PRIVATE_KEY" not in text:
             continue
-        assert path.name == "fill-form.yml", f"{path.name} references CASE_DATA_PRIVATE_KEY"
-    workflow = yaml.safe_load(Path(".github/workflows/fill-form.yml").read_text())
-    for name, job in workflow["jobs"].items():
-        if name == "fill":
-            continue
-        assert "CASE_DATA_PRIVATE_KEY" not in str(job), f"job {name} references CASE_DATA_PRIVATE_KEY"
-    step = next(s for s in workflow["jobs"]["fill"]["steps"] if s.get("name") == "Fill, verify and send")
-    assert step["env"]["CASE_DATA_PRIVATE_KEY"] == "${{ secrets.CASE_DATA_PRIVATE_KEY }}"
-    others = [s for s in workflow["jobs"]["fill"]["steps"] if s is not step]
-    for s in others:
-        assert "CASE_DATA_PRIVATE_KEY" not in str(s)
+        assert path.name in ("fill-form.yml", "fill-batch.yml"), f"{path.name} references CASE_DATA_PRIVATE_KEY"
+    for path, (job_name, step_name, _input) in GATED.items():
+        workflow = yaml.safe_load(Path(path).read_text())
+        for name, job in workflow["jobs"].items():
+            if name == job_name:
+                continue
+            assert "CASE_DATA_PRIVATE_KEY" not in str(job), f"job {name} references CASE_DATA_PRIVATE_KEY"
+        step = next(s for s in workflow["jobs"][job_name]["steps"] if s.get("name") == step_name)
+        assert step["env"]["CASE_DATA_PRIVATE_KEY"] == "${{ secrets.CASE_DATA_PRIVATE_KEY }}"
+        others = [s for s in workflow["jobs"][job_name]["steps"] if s is not step]
+        for s in others:
+            assert "CASE_DATA_PRIVATE_KEY" not in str(s)

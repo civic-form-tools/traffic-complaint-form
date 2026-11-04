@@ -105,3 +105,23 @@ Then run **Actions -> Fill and send complaint form** with
 `encrypted_case` = the single-line contents of `case.enc`, and approve the
 `filing` environment gate. Delete `case.json` and `case.enc` afterwards -
 the ciphertext is safe to paste, the plaintext file is not safe to keep.
+
+
+## Batch payload (`encrypted_batch`)
+
+The `Fill and send complaint forms (batch)` workflow takes one sealed-box
+payload `{"cases": [<case>, ...]}` where every `<case>` is exactly the JSON
+schema above (`incidents[]` merge included). Rules:
+
+- At most **20 cases** per run (the dispatch input size limit).
+- Every case is validated before anything is rendered; an invalid case fails
+  the whole run and no archive is mailed. Errors cite the case number
+  (`case #2: ...`), never case content.
+- The run produces **open** (unlocked) PDFs inside ONE encrypted ZIP whose
+  password is the bundle's `archive_password`; member names are neutral
+  (`complaint-01.pdf` ... in payload order). The archive format is the
+  bundle's `archive_format` (default `zip-legacy`; see SECRETS.md for the
+  tradeoff).
+- Seal the whole batch file with the same helper:
+  `traffic-complaint-form-encrypt-case --in batch.json --out batch.enc`,
+  then paste `batch.enc` into the `encrypted_batch` input.
