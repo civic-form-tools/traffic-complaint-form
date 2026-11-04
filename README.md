@@ -56,6 +56,17 @@ Use dry_run to build and verify without email. CI uses invented fixtures only.
 Read the [threat model](docs/SECRETS.md#threat-model-and-trust-boundary):
 a bundle prevents partial secret replacement, not malicious approved code.
 
+## Filing several complaints (batch)
+
+The **Fill and send complaint forms (batch)** workflow fills N cases from one
+sealed-box payload (`{"cases": [...]}`, same per-case schema) and emails ONE
+password-encrypted ZIP of open PDFs. The archive password and format
+(`zip-legacy` default, `zip-aes` optional) are the `archive_password` /
+`archive_format` fields of a version-2 FILING_BUNDLE - see
+[docs/SECRETS.md](docs/SECRETS.md) for the template and the ZipCrypto
+tradeoff. Batch requires a version-2 bundle; single mode keeps working with
+version 1 and still delivers an individually locked PDF.
+
 ## Filing a real complaint
 
 Real case data must not appear in public inputs/logs. Encrypt it with the

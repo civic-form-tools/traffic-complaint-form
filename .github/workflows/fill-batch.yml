@@ -1,0 +1,95 @@
+name: Fill and send complaint forms (batch)
+
+on:
+  workflow_dispatch:
+    inputs:
+      encrypted_batch:
+        description: "מטען אצווה מוצפן (sealed box, base64) של {\"cases\": [...]} - הערוץ היחיד לנתונים אמיתיים; ריק = נתוני דוגמה"
+        required: false
+        default: ""
+      sample_data: {description: "מלא נתוני דוגמה בדייקניים (לבדיקת צינור)", type: boolean, default: true}
+      validate_only: {description: "Validate configuration only; no PDF or email", type: boolean, default: false}
+      dry_run: {description: "בנה ואמת את ארכיון ה-ZIP בלבד, אל תשלח מייל", type: boolean, default: false}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fill-batch
+  cancel-in-progress: false
+
+jobs:
+  fill-batch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production # required reviewers gate every run before secrets are exposed
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: System libraries for WeasyPrint and Hebrew fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
+            fonts-noto-core fonts-dejavu
+
+      - run: pip install -e .
+
+      - name: Build batch payload
+        env:
+          ENCRYPTED_BATCH: ${{ inputs.encrypted_batch }}
+        run: |
+          if [ -n "$ENCRYPTED_BATCH" ]; then
+            printf '%s' "$ENCRYPTED_BATCH" > /tmp/batch.enc
+            echo "MODE=encrypted" >> "$GITHUB_ENV"
+          else
+            echo "MODE=sample" >> "$GITHUB_ENV"
+          fi
+
+      - name: Fill, archive, verify and send
+        run: |
+          set -e
+          if [ "$VALIDATE_ONLY" = "true" ]; then
+            python -m traffic_complaint_form --validate-config
+            exit 0
+          fi
+          case "$MODE" in
+            encrypted) python -m traffic_complaint_form --batch-encrypted /tmp/batch.enc --out-dir out ${DRY:+--dry-run} ;;
+            sample)    python -m traffic_complaint_form --batch-sample --out-dir out ${DRY:+--dry-run} ;;
+          esac
+        env:
+          # Both secrets exist ONLY as protected `production` environment secrets
+          # (no repository-level copies); this step is their sole exposure point.
+          FILING_BUNDLE: ${{ secrets.FILING_BUNDLE }}
+          CASE_DATA_PRIVATE_KEY: ${{ secrets.CASE_DATA_PRIVATE_KEY }}
+          TEST_MODE: ${{ inputs.encrypted_batch == '' && 'true' || vars.TEST_MODE }}
+          ENCRYPT_OUTPUT: ${{ vars.ENCRYPT_OUTPUT }}
+          VALIDATE_ONLY: ${{ inputs.validate_only }}
+          DRY: ${{ inputs.dry_run && '1' || '' }}
+
+      - name: Post-run verification summary
+        if: ${{ !inputs.validate_only }}
+        run: |
+          python3 - <<'PY'
+          import glob, os
+          files = glob.glob("out/*.zip")
+          assert len(files) == 1, f"expected exactly one output archive, found {files}"
+          size = os.path.getsize(files[0])
+          assert size > 5_000, f"output suspiciously small: {size}"
+          import pyzipper
+          with pyzipper.AESZipFile(files[0]) as z:
+              names = z.namelist()
+              assert names, "archive has no members"
+              try:
+                  z.read(names[0])
+                  raise SystemExit("archive opens WITHOUT a password - refusing to finish green")
+              except RuntimeError:
+                  pass
+          print(f"verification OK: one archive, {len(names)} members, {size} bytes, password required")
+          PY
